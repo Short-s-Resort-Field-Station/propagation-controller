@@ -1,0 +1,113 @@
+/* Live-build adjustments on top of pgui.css — reclaim ~14px of vertical
+   space so the reservoir footer's percentage line sits fully inside the
+   880×528 canvas (the prototype clipped it by a few pixels). */
+/* Bottom padding must clear the inner engraved frame line (inset 19px). */
+.rk2-inner { padding: 18px 30px 27px; }
+.rk2-mast { margin-bottom: 2px; }
+.rk2-sub { margin-bottom: 4px; }
+.rk2-resv { margin-top: 4px; }
+.rk2-resv .pct { margin-top: 3px; font-size: 12px; }
+.rk2-measure { height: 16px !important; }
+
+/* Design audit (Austin, 2026-07-06): the em-dash "—" placeholder readings
+   rendered as heavy black bars. Probe-less readings now say "no probe" in
+   quiet mono instead. */
+.rk2-plate .rd.noprobe,
+.rk2-card .v.noprobe {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sfaint);
+  line-height: 1.6;
+}
+.rk2-card .v.noprobe { margin-top: 10px; }
+
+/* Detail screen: keep the action row clear of the inner frame line. */
+.rk2-dinner { padding: 20px 30px 30px; }
+.rk2-water { gap: 11px; }
+.rk2-actions { margin-bottom: 2px; }
+
+/* Design-bundle bug (Austin's "black lines above Target"): the Controls
+   slider class `.rng` — a 200×3px ink bar — also matches the detail cards'
+   range-text <div class="rng">. Undo the slider geometry for card text. */
+.rk2-card div.rng {
+  width: auto; height: auto; background: transparent; border-radius: 0;
+}
+
+/* Three reading cards (moisture · temperature · pH) on the detail screen. */
+.rk2-dread.three { grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.rk2-dread.three .rk2-card { padding: 12px 14px; gap: 12px; min-width: 0; }
+.rk2-dread.three .rk2-card .meta { min-width: 0; }
+.rk2-dread.three .rk2-card .v { font-size: 34px; }
+.rk2-dread.three .rk2-card .v span { font-size: 15px; }
+.rk2-dread.three .rk2-card .rng { font-size: 10px; margin-top: 6px; }
+.rk2-dread.three .rk2-card .k { font-size: 10.5px; letter-spacing: 0.14em; }
+
+/* ============ LEGIBILITY PASS (Austin, 2026-07-06) ============
+   The physical panel is 5" at 800×480 (~186 PPI): the handoff's 9–13px
+   labels render ~1.5 mm tall. Everything scales up ~25–35% for arm's-length
+   reading; fonts, tracking, and color language unchanged. */
+
+/* Slightly brighter dim tones — same hue family, more contrast on glass. */
+.rk2-screen, .rk2-detail {
+  --sdim: #D3CCB3;
+  --sfaint: #9C947C;
+}
+
+/* Header row */
+.rk2-eye { font-size: 13px; }
+.rk2-sub .date, .rk2-sub .time { font-size: 16px; }
+.rk2-status { font-size: 16px; }
+
+/* Shelf plates (dial shrinks 96→82 in JSX so the larger type still fits the
+   fixed 528px canvas) */
+.rk2-plate .ph { font-size: 15px; padding: 5px 4px; }
+.rk2-plate .nm { font-size: 21px; min-height: 38px; padding: 4px 8px 1px; }
+.rk2-plate .dial { padding: 0; }
+.rk2-plate .rd { font-size: 32px; margin-top: 0; }
+.rk2-plate .rd small { font-size: 13px; }
+.rk2-plate .rd.noprobe { font-size: 13px; }
+.rk2-plate .tp { font-size: 13.5px; margin-top: 1px; }
+.rk2-plate .tag { font-size: 13px; padding: 5px 13px; margin: 5px 0 6px; }
+
+/* Roster / ledger layout */
+.rk2-lhead { font-size: 14px; }
+.rk2-lrow .rn { font-size: 30px; }
+.rk2-lrow .sp { font-size: 22px; }
+.rk2-lrow .sp small { font-size: 13px; }
+.rk2-tag2 { font-size: 13.5px; }
+.rk2-mini { height: 12px; }
+
+/* Reservoir footer */
+.rk2-resv .lab { font-size: 14px; }
+.rk2-resv .pct { font-size: 15px !important; }
+.rk2-resv .pct b { font-size: 23px; }
+
+/* Detail screen */
+.rk2-plaque { font-size: 15px; padding: 10px 16px; }
+.rk2-dname .tg { font-size: 15px; }
+.rk2-card .k { font-size: 13px; }
+.rk2-card .rng { font-size: 13px; }
+.rk2-dread.three .rk2-card .k { font-size: 12.5px; letter-spacing: 0.12em; }
+.rk2-dread.three .rk2-card .v { font-size: 38px; }
+.rk2-dread.three .rk2-card .v span { font-size: 16px; }
+.rk2-dread.three .rk2-card .v.noprobe { font-size: 13px; }
+.rk2-dread.three .rk2-card .rng { font-size: 12.5px; }
+.rk2-light .ll .k { font-size: 14px; }
+.rk2-light .ll .ph { font-size: 18px; }
+.rk2-seg button { font-size: 16px; padding: 12px 22px; }
+.rk2-wbtn { font-size: 19px; padding: 16px 0; }
+.rk2-pump .lbl { font-size: 15px; }
+
+/* Theme toggle — dark instrument ⇄ limestone day mode, top-right corner. */
+.rk2-themebtn {
+  position: absolute; top: 26px; right: 30px; z-index: 6;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--sdim);
+  border: 1px solid var(--sline); border-radius: 3px;
+  cursor: pointer;
+}
+.rk2-themebtn:active { color: var(--sink); border-color: var(--sink); }

@@ -1,0 +1,23 @@
+[Unit]
+Description=Propagation Touchscreen Kiosk
+After=propagationd.service
+Wants=propagationd.service
+
+[Service]
+# cage: single-app Wayland compositor; chromium locked to the touch UI.
+# The Waveshare 5" panel is 800x480 over HDMI with USB HID touch — no extra
+# drivers or xorg config needed.
+ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \
+    --kiosk \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --check-for-update-interval=31536000 \
+    --app=http://localhost/ui/touch
+Restart=always
+RestartSec=3
+User=kiosk
+Group=kiosk
+
+[Install]
+WantedBy=graphical.target

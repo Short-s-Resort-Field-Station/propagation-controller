@@ -1,0 +1,21 @@
+[Unit]
+Description=Propagation Controller
+After=network.target
+
+[Service]
+ExecStart=/opt/propagation-controller/propagationd
+Environment=PROPAGATION_DATA_DIR=/var/lib/propagation-controller
+Environment=PROPAGATION_LISTEN=:80
+Restart=always
+RestartSec=3
+User=propagation
+Group=propagation
+SupplementaryGroups=dialout
+WorkingDirectory=/var/lib/propagation-controller
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/propagation-controller
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Propagation Controller Watchdog
+After=propagationd.service
+
+[Service]
+# Monitors propagationd's health endpoint; on sustained failure restarts the
+# service, and if restarts don't recover it, stops the service, takes the
+# relay port, and forces pump/valves/fans off. Needs root (or polkit rules)
+# for systemctl and dialout for the serial port.
+ExecStart=/opt/propagation-controller/propagation-watchdog \
+    -health-url http://localhost/api/v1/health \
+    -interval 10s -fail-threshold 3 -restart-limit 2
+Restart=always
+RestartSec=5
+User=root
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,63 @@
+package config
+
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strconv"
+)
+
+// Config holds process-level settings. Everything operational (schedules,
+// zones, calibration, ...) lives in the database per the spec; this is only
+// what the daemon needs before the database is open.
+type Config struct {
+	ListenAddr string
+	DataDir    string
+	Simulation bool
+	RelayPort  string
+	ModbusPort string
+	ModbusBaud int
+	LogLevel   string
+	LogPretty  bool
+}
+
+func Load() Config {
+	var c Config
+	flag.StringVar(&c.ListenAddr, "listen", envOr("PROPAGATION_LISTEN", ":8080"), "HTTP listen address")
+	flag.StringVar(&c.DataDir, "data-dir", envOr("PROPAGATION_DATA_DIR", "./data"), "directory for database and runtime data")
+	flag.BoolVar(&c.Simulation, "simulation", envBool("PROPAGATION_SIMULATION"), "run with simulated hardware drivers")
+	flag.StringVar(&c.RelayPort, "relay-port", envOr("PROPAGATION_RELAY_PORT", ""), "serial port of the Numato relay controller (autodetected if empty)")
+	flag.StringVar(&c.ModbusPort, "modbus-port", envOr("PROPAGATION_MODBUS_PORT", ""), "serial port of the RS485 adapter (autodetected if empty)")
+	flag.IntVar(&c.ModbusBaud, "modbus-baud", envIntOr("PROPAGATION_MODBUS_BAUD", 9600), "Modbus RTU baud rate")
+	flag.StringVar(&c.LogLevel, "log-level", envOr("PROPAGATION_LOG_LEVEL", "info"), "log level: debug|info|warn|error")
+	flag.BoolVar(&c.LogPretty, "log-pretty", envBool("PROPAGATION_LOG_PRETTY"), "human-readable console logs instead of JSON")
+	flag.Parse()
+	return c
+}
+
+func (c Config) DatabasePath() string {
+	return filepath.Join(c.DataDir, "propagation.db")
+}
+
+func (c Config) EnsureDataDir() error {
+	return os.MkdirAll(c.DataDir, 0o755)
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envBool(key string) bool {
+	v, err := strconv.ParseBool(os.Getenv(key))
+	return err == nil && v
+}
+
+func envIntOr(key string, fallback int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil {
+		return v
+	}
+	return fallback
+}

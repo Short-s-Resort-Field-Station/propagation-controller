@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Propagation Unit 01 — Touch</title>
+<style>
+  /* Sized for the Waveshare 5" 800x480 panel. */
+  :root {
+    --bg: #0e1116; --panel: #161b22; --border: #262d38;
+    --text: #d4dae3; --dim: #7a8494; --on: #4c9e6c; --err: #c05252;
+  }
+  * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--err); }
+  .dot.ok { background: var(--on); }
+  .spacer { flex: 1; }
+  .badge { font-size: 12px; color: var(--dim); border: 1px solid var(--border); padding: 2px 8px; border-radius: 10px; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; padding: 12px 16px; }
+  .status { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 8px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; }
+  .stat .k { font-size: 11px; color: var(--dim); text-transform: uppercase; }
+  .stat .v { font-size: 22px; font-weight: 700; }
+  .stat .v.on { color: var(--on); }
+  .controls { display: grid; grid-template-rows: repeat(5, 1fr) 1.2fr; gap: 8px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { border: 1px solid var(--border); background: var(--panel); color: var(--text);
+           border-radius: 10px; font-size: 20px; font-weight: 700; cursor: pointer; }
+  button:active { background: #232c3a; }
+  button.stop { background: #3a1414; border-color: var(--err); color: #ff9d9d; font-size: 24px; letter-spacing: 1px; }
+  .label { position: absolute; } /* unused, kept minimal */
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Propagation Unit 01</h1>
+  <span class="badge" id="sim" hidden>SIM</span>
+  <div class="spacer"></div>
+  <span class="badge" id="clock"></span>
+</header>
+<main>
+  <div class="status">
+    <div class="stat"><div class="k">Reservoir</div><div class="v" id="reservoir">—</div></div>
+    <div class="stat"><div class="k">Moisture</div><div class="v" id="moisture">—</div></div>
+    <div class="stat"><div class="k">Soil Temp</div><div class="v" id="temp">—</div></div>
+    <div class="stat"><div class="k">Lights</div><div class="v" id="lights">—</div></div>
+    <div class="stat"><div class="k">Pump</div><div class="v" id="pump">—</div></div>
+    <div class="stat"><div class="k">Valves Open</div><div class="v" id="valves">—</div></div>
+  </div>
+  <div class="controls">
+    <div class="row">
+      <button onclick="lights('on')">Lights ON</button>
+      <button onclick="lights('off')">Lights OFF</button>
+    </div>
+    <div class="row">
+      <button onclick="set(7,'on')">Fans ON</button>
+      <button onclick="set(7,'off')">Fans OFF</button>
+    </div>
+    <div class="row">
+      <button onclick="set(2,'on',10)">Pump 10s</button>
+      <button onclick="set(2,'on',30)">Pump 30s</button>
+    </div>
+    <div class="row">
+      <button onclick="runZone('zone_1')">Shelf 1 · Water</button>
+      <button onclick="runZone('zone_2')">Shelf 2 · Water</button>
+    </div>
+    <div class="row">
+      <button onclick="runZone('zone_3')">Shelf 3 · Water</button>
+      <button id="zoneStatus" disabled style="font-size:14px;color:var(--dim)">—</button>
+    </div>
+    <div class="row">
+      <button class="stop" onclick="stopAll()">STOP ALL</button>
+      <button class="stop" id="estopBtn" onclick="toggleEstop()">E-STOP</button>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+
+async function api(path, opts) {
+  const res = await fetch('/api/v1' + path, opts);
+  if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+  return res.json();
+}
+
+// Every touch command is bounded: pump and valves always carry a timeout, so
+// nothing can be left running from this screen (spec §18.3).
+async function set(channel, state, timeout) {
+  try {
+    await api(`/relays/${channel}/set`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({state, actor: 'manual_touch', reason: 'touchscreen', timeout_seconds: timeout || 0})
+    });
+  } catch (e) { console.error(e); }
+  refresh();
+}
+
+async function stopAll() {
+  try { await api('/relays/all-off', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({actor: 'manual_touch', reason: 'touchscreen stop all'})}); }
+  catch (e) { console.error(e); }
+  refresh();
+}
+
+// Lights go through the lighting service so the schedule respects the manual
+// override instead of fighting it.
+async function lights(mode) {
+  try {
+    await api(`/lighting/${mode}`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({actor: 'manual_touch'})});
+  } catch (e) { console.error(e); }
+  refresh();
+}
+
+// Zone runs use the irrigation engine: bounded duration, FIFO queue — two
+// shelves can never flood at once.
+async function runZone(key) {
+  try {
+    await api(`/irrigation/zones/${key}/run`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({actor: 'manual_touch', reason: 'touchscreen'})});
+  } catch (e) { console.error(e); }
+  refresh();
+}
+
+let estopActive = false;
+async function toggleEstop() {
+  try {
+    if (estopActive) {
+      await api('/safety/reset', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({actor: 'manual_touch'})});
+    } else {
+      await api('/safety/emergency-stop', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({actor: 'manual_touch', reason: 'touchscreen emergency stop'})});
+    }
+  } catch (e) { console.error(e); }
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const h = await api('/health');
+    $('dot').className = 'dot ' + (h.status === 'ok' ? 'ok' : '');
+    $('sim').hidden = !h.simulation;
+
+    const sf = await api('/safety/status');
+    estopActive = sf.emergency_stop.active;
+    $('estopBtn').textContent = estopActive ? 'RESET E-STOP' : 'E-STOP';
+    const sn = await api('/sensors');
+    const meas = {};
+    for (const dev of sn.sensors)
+      for (const m of dev.measurements)
+        if (m.value != null) meas[m.name] = `${m.value.toFixed(1)}${m.unit}`;
+    $('reservoir').textContent = meas['level'] || '—';
+    $('moisture').textContent = meas['moisture'] || '—';
+    $('temp').textContent = meas['temperature'] || '—';
+
+    const rl = await api('/relays');
+    const byCh = Object.fromEntries(rl.relays.map(r => [r.channel, r.state]));
+    $('lights').textContent = (byCh[1] || '—').toUpperCase();
+    $('lights').className = 'v' + (byCh[1] === 'on' ? ' on' : '');
+    $('pump').textContent = (byCh[2] || '—').toUpperCase();
+    $('pump').className = 'v' + (byCh[2] === 'on' ? ' on' : '');
+    const open = [3,4,5,6].filter(ch => byCh[ch] === 'on');
+    $('valves').textContent = open.length ? open.map(ch => ch - 2).join(', ') : 'None';
+
+    const ir = await api('/irrigation/zones');
+    const eng = ir.engine;
+    let zs = 'Idle';
+    if (eng.active_cycle) zs = `${eng.active_cycle.zone_key.replace('zone_','Shelf ')}: ${eng.active_cycle.state}`;
+    if (eng.queue.length) zs += ` +${eng.queue.length} queued`;
+    $('zoneStatus').textContent = zs;
+  } catch (e) {
+    $('dot').className = 'dot';
+  }
+  $('clock').textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
