@@ -1,156 +1,172 @@
-# Propagation Controller
+<div align="center">
 
-Backend + UI for **Propagation Unit 01** — a local-first embedded Linux control
-appliance for automated plant propagation. See [`docs/SPEC.md`](docs/SPEC.md)
-for the full architecture spec and [`docs/HARDWARE.md`](docs/HARDWARE.md) for
-the hardware inventory.
+<img src="web/public/seal.png" width="110" alt="Dept. of Forestry & Fire — Growth & Renewal">
 
-## Status: Phases 0–7 complete (of 8 phases)
+# PROPAGATION UNIT · No. 01
 
-Phase 7 (data retention & aggregation):
+**SHORT'S RESORT · DEPT. OF FORESTRY & FIRE**
+FIELD STATION INSTRUMENTATION
 
-- Hourly aggregates computed continuously (5-min refresh over a 48 h window,
-  idempotent upserts); raw readings pruned daily after 30 days (configurable
-  via settings key `retention`), always aggregated before deletion
-- `GET /api/v1/sensors/{key}/readings?interval=hour` serves the long-term series
-- **Environmental tab now charts real hourly aggregates** (dynamic y-bounds,
-  per-shelf legend, honest "collecting data" state) and watering minutes from
-  real cycle history
-- **Controls tab writes through**: sliders load each zone's actual moisture
-  rule + the rack photoperiod; Review & Apply PUTs moisture-control and the
-  lighting schedule (single-shelf or all-shelves scope); manual-override
-  toggle drives the real lighting service
-- Dashboard tabs are deep-linkable (`/#environmental`, `/#controls`, `/#shelves`)
+`FILE NO. SR–PROP–02` · `SOFTWARE & CONTROL` · `FIELD YEAR 01`
 
-**The production frontend is live** — built from the design handoff's actual
-components (see `web/design-src/` for the extracted originals):
+*Texas Hill Country · Edwards Plateau · Lampasas River*
+31°07′21.0″N · 98°02′52.9″W
 
-- `/` — Surface B, the paper control center: Dashboard / Shelf Management /
-  Environmental / Controls tabs, live stat cells, field-notebook event log,
-  reservoir gauge, alerts + acknowledge flow, specimen assignment (fed by the
-  real species register), sign-in modal
-- `/ui/touch` — Surface A · Round 2, the sculptural instrument face: fixed
-  880×528 canvas auto-scaled to the 800×480 panel, needle-dial shelf plates,
-  live status chip (Operational/Watering/Fault), shelf detail with Water Now,
-  rack-wide Lighting and Fans On/Off (wired to the real relays)
-- Live bridge: `web/src/live/` polls the REST API at 2.5 s and maps responses
-  onto the handoff's §7 data contract; every action carries its surface's
-  actor (`manual_web` / `manual_touch`)
-- Self-hosted fonts (Zilla Slab, Newsreader, JetBrains Mono) — no CDN, works
-  fully offline
-- `make web` builds the frontend and embeds it in the binary; without it the
-  Phase 0 shells still serve
+</div>
 
-Backend:
+---
 
-Working now:
+## The Apparatus
 
-- `propagationd` Go daemon with SQLite (WAL) and embedded migrations (full v1.0 schema)
-- Health API, relay API with durable action logging and **server-enforced timeouts**
-- Numato 8-channel USB relay driver (echo handling, 1→0 channel mapping) + simulation mock
-- **Modbus RTU bus** (goburrow) over the FTDI RS485 adapter + simulated bus with drifting values
-- **Generic JSON-configured Modbus sensor driver** — new sensors are config, not code
-- Per-sensor polling loops with immediate first poll, batched reads into SQLite,
-  offline detection (N consecutive failures) with status-change events, recovery events
-- Sensors API: list/latest/history/force-poll + **config hot-reload** (PATCH restarts the poller, no service restart)
-- Diagnostics: bus health + **address scan** (`POST /api/v1/diagnostics/modbus/scan`)
-- **Safety supervisor** (spec §12): every relay-on command is authorized; off is never blocked
-  - Emergency stop (web / touch / API) — forces pump+valves off, latches until manual reset,
-    re-enforces the safe state every second while latched
-  - Pump max-runtime enforcement → forced off + manual-clear lockout
-  - Reservoir low / sensor-stale lockouts (auto-set, auto-clear on recovery)
-  - Safety API: status, emergency-stop, reset, lockouts, lockout clear
-  - Limits editable at runtime via `PUT /api/v1/settings` (`safety` key, hot-applied)
-- Settings API (GET/PUT key-value JSON)
-- **Irrigation engine** (spec §9): 3 shelf zones + 1 disabled for expansion, shared manifold model
-  - **Strict single-zone rule: a FIFO queue serializes all watering — two shelves can never flood at once**
-  - Cycle state machine: precheck → open valve → start pump → flood → stop pump → (drain) → close valve
-  - Valve opens before pump starts; pump stops before valve closes (never pump a closed manifold)
-  - Optional per-zone moisture target ends flooding early; duration is the hard cap
-  - Relay backstop timers on pump and valve — a dead process can't leave water running
-  - Manual runs (web/touch/API) with per-zone default duration; stop aborts active or dequeues
-  - Full cycle history: trigger, durations, reservoir/moisture start+end, result, abort reason
-  - Safety-integrated: precheck + mid-flood lockout/e-stop watch aborts within 250 ms
-- **Lighting service** (spec §10): rack-wide photoperiod schedule (default 06:00–19:30),
-  manual on/off overrides with optional expiry, edge-triggered control loop that
-  **restores the expected state at startup** and never fights manual relay commands
-- **Circulation fans**: all ganged on relay 7, simple on/off toggle (touch + API)
-- **Species catalog**: 21 specimens from the propagation manual at
-  `GET /api/v1/species` (provisional — regenerated when Austin's new document
-  replaces the A–U plate system); shelves take species assignments via zone PATCH
-- **Automation service** (spec addendum + §11): both triggers only ever Enqueue,
-  so the one-shelf-at-a-time rule holds for automation too
-  - Moisture rules per zone: trigger-below threshold, hysteresis (recovered-above),
-    minimum interval, max cycles per rolling 24 h, sensor-offline lockout;
-    `GET/PUT /api/v1/irrigation/zones/{key}/moisture-control`
-  - Scheduled irrigation: time-of-day rules in the schedules table with full CRUD
-    (`/api/v1/schedules`); missed runs are skipped after downtime (spec §11.2)
-  - Global automation kill switch: settings key `automation` `{"enabled": false}`
-  - Blocked-trigger events are de-duplicated (one event per condition, not per tick)
-- Safe startup/shutdown state: pump + valves forced off
-- System event log (database + structured process log)
-- Embedded web dashboard (`/`) with live sensor tiles and 800×480 touch shell (`/ui/touch`)
-- systemd units + installer skeleton
+Propagation Unit No. 01 is a semi-automated nursery rack: four shelves of
+native Texas restoration stock — the cypress, oaks, persimmons, and their
+kin bound for the riverbanks and shelterbelts of Short's Resort — raised
+under managed light, water, and air. This repository is the unit's whole
+nervous system: one Go daemon driving the pump, solenoids, lights, and fans;
+reading the soil and the reservoir; enforcing the safety rules; keeping the
+ledger; and presenting two faces to its operators.
 
-**Authentication & remote access (Phase 8):**
+The unit is a piece of field equipment that happens to have a screen. It
+works with no internet, keeps its own records, waters on its own judgment
+within limits a steward sets, and fails toward *off* — a dead controller
+means closed valves and a resting pump, never a flooded floor.
 
-- Real accounts: bcrypt passwords, hashed session tokens, HttpOnly cookies
-- Roles: Steward (admin) · Grower (operator) · Viewer — **all reads are
-  public** (followers watch, can't touch); control needs Grower, config needs
-  Steward; the rack touchscreen is trusted via loopback (no sign-in at the unit)
-- First-boot setup wizard creates the steward account (local network only)
-- Operator management UI (add/disable/re-role/reset password, last-admin guard)
-- `docs/remote-access.md`: serving `unit01.shortsfieldstation.org` from the
-  Piconium via Cloudflare Tunnel (or Caddy)
+<div align="center">
+<img src="docs/images/rack-dark.png" width="640" alt="The rack face — dark instrument theme"><br>
+<sub>SURFACE A · THE RACK FACE — 5″ touchscreen, read standing, tapped gloved</sub>
+</div>
 
-**Live streaming & the watchdog (Phase 8, complete):**
+## Two Surfaces, One Instrument
 
-- SSE at `GET /api/v1/events/stream` (spec §16): system events, relay actions,
-  sensor readings, and irrigation cycle updates push live; the UIs refresh
-  instantly on push and fall back to polling if the stream drops
-- `propagation-watchdog` binary: health-checks propagationd, restarts it on
-  sustained failure, and if restarts don't recover it, stops the service,
-  takes the relay port, and forces pump/valves/fans off (escalation ladder
-  unit-tested; resurrection verified end-to-end)
+**The rack face** (`/ui/touch`) is the panel mounted on the unit itself: an
+engraved apparatus of needle dials and status lamps on dark glass, with a
+limestone day-mode for bright mornings. Tap a shelf plate for its detail —
+moisture, temperature, soil pH — and *Water Now* runs a real, bounded,
+safety-checked pump cycle. No sign-in at the rack: standing in front of the
+machine is credential enough.
 
-Remaining before hardware: optional rack PIN lock screen. Hardware-dependent:
-real Numato/Modbus bring-up, kiosk deployment, hardware-in-the-loop safety
-tests, pump flow calibration.
+<div align="center">
+<img src="docs/images/rack-detail.png" width="470" alt="Shelf detail with three needle dials">
+<img src="docs/images/rack-limestone.png" width="470" alt="Limestone day mode"><br>
+<sub>SHELF DETAIL · AND THE LIMESTONE DAY MODE</sub>
+</div>
 
-## Development (no hardware needed)
+**The control center** (`/`) is the paper surface for a grower at a desk:
+operations overview, shelf management with specimen assignment from the
+station's native catalog, environmental charts drawn from hourly aggregates,
+per-shelf irrigation parameters, the field-notebook event log, and operator
+administration.
 
-```sh
-make run-sim        # simulated relay controller, pretty logs, ./data/propagation.db
-open http://localhost:8080          # web dashboard
-open http://localhost:8080/ui/touch # touch shell
+<div align="center">
+<img src="docs/images/dashboard.png" width="900" alt="The paper control center"><br>
+<sub>SURFACE B · THE CONTROL CENTER — anyone may watch; only operators may touch</sub>
+</div>
+
+Anyone with the unit's address sees everything, live. Turning anything on
+requires a signed-in **Grower**; changing how the unit thinks requires a
+**Steward**. Curious followers get the full aquarium view — the glass does
+not open.
+
+## What the Unit Does
+
+- **Irrigation** — four independently valved shelves fed by one pump through
+  a shared manifold. A strict queue guarantees *one shelf floods at a time*.
+  Cycles run 1–30 minutes (the big pots soak long), stop early at a moisture
+  target, and log reservoir and soil readings before and after.
+- **Sensor-triggered watering** — per-shelf moisture rules with hysteresis,
+  minimum rest intervals, daily cycle limits, and a lockout when a probe
+  goes quiet. A shelf without a probe is *unmetered*, never presumed dry.
+- **Lighting** — one photoperiod for the rack (on-at + hours-of-light, so the
+  arithmetic can never exceed a day), manual overrides with expiry, and the
+  correct scheduled state restored after any power loss.
+- **Safety, layered** — a supervisor authorizes every relay-on; emergency
+  stop latches until a human clears it; the pump has a hard runtime ceiling;
+  low or unreadable reservoir locks watering out; relay-level timers back up
+  the software; and an independent **watchdog process** restarts a dead
+  daemon or, failing that, seizes the relay port and forces the safe state.
+- **The record** — every relay click, sensor poll, watering cycle, sign-in,
+  and safety event is written down. Raw readings keep 30 days; hourly
+  aggregates keep forever. Live changes stream to both surfaces in under a
+  second.
+- **Simulation** — the entire unit runs without hardware (`make run-sim`),
+  with mock relays and drifting mock sensors. Everything in this repository
+  was built and verified that way before the first wire is crimped.
+
+## Manifest of Parts
+
+| # | Part | Duty | Channel / Bus | Notes |
+|---|------|------|---------------|-------|
+| 1 | **Piconium** (Embedded Now, Kit 002 or 003) | The unit's mind | — | x86-64, 4 GB RAM, NVMe for OS & records. Kit 003's Atom E3845 wants `intel_idle.max_cstate=1`. |
+| 2 | **Numato Lab 8-channel USB relay module** | The unit's hands | USB · `/dev/ttyACM*` | Loads wired **normally-open**: de-energized = off. All channels spoken for at 6 shelves — expansion means a second board. |
+| 3 | **Barina grow lights** | Photoperiod | Relay 1 | 120 VAC — the only mains load. Rack-wide circuit; per-shelf dark via the physical switch. |
+| 4 | **SEAFLO diaphragm pump** | Water from jug to manifold | Relay 2 | 12 VDC. Verify amperage against ~7 A contacts; interpose an automotive relay if close. Flyback diode. |
+| 5 | **U.S. Solid JFSV00012 solenoid valves ×4** | One per shelf | Relays 3–6 | 12 VDC, **normally closed** — power loss seals the water in the jug. Flyback diodes. |
+| 6 | **12 V USB desk fans** (plugs stripped) | Air across the canopy | Relay 7 | Single speed, ganged as one circuit, one honest toggle. |
+| 7 | **Waveshare 5″ touchscreen** (800×480) | The rack face | HDMI + USB HID | No drivers. UI drawn on an 880×528 canvas, scaled exactly. |
+| 8 | **Xiusiyt RS485-WE-1800-BT cable** | The sensor party line | USB · `/dev/ttyUSB*` | Genuine FT232RQ + SP485EN, auto TX-direction, Tx/Rx lamps. Jumper Term1↔Term2 for 120 Ω termination. |
+| 9 | **RS485 soil probes** (moisture · temp · pH) | Per-shelf ground truth | Modbus RTU, 9600 8N1 | IP68, 12 V. Ship at address 1 — commission **one at a time** and re-address. Register maps verified at the bench. |
+| 10 | **Submersible level transmitter** (SS304) | Reservoir eyes | Modbus RTU | Hydrostatic; reports water column — calibrated empty/full to percent. |
+| 11 | **7-gallon jug** (26.5 L) | The reservoir | — | Days-remaining estimated until pump flow is calibrated. |
+| 12 | 12 V supply, common ground, flyback diodes | Housekeeping | — | Sensor power from the 12 V rail — *never* the RS485 cable's 5 V pin. One ground for rail and bus. |
+
+Full electrical notes, wiring cautions, and open bench questions:
+[`docs/HARDWARE.md`](docs/HARDWARE.md).
+
+## The Nervous System
+
+```
+propagationd ──── one static Go binary, SQLite, both UIs embedded
+ ├─ device manager      sole owner of the relays · audit log · bounded timers
+ ├─ safety supervisor   authorizes every relay-on · e-stop latch · lockouts
+ ├─ irrigation engine   the one-shelf-at-a-time queue · cycle state machine
+ ├─ lighting service    photoperiod · overrides · restore-after-reboot
+ ├─ automation          moisture rules & schedules — they only ever enqueue
+ ├─ sensor service      generic JSON-configured Modbus driver · hot reload
+ ├─ retention           hourly aggregates forever · raw pruned at 30 days
+ ├─ auth                bcrypt · sessions · Steward / Grower / Viewer
+ └─ event stream        SSE push to every open surface
+
+propagation-watchdog ── separate binary; restarts the daemon, or stops it,
+                        takes the relay port, and forces pump & valves off
 ```
 
+Two rules bind everything: **nothing touches hardware except the device
+manager**, and **nothing turns on without the safety supervisor's leave.**
+The test suite (12 packages) includes a proof that two shelves can never
+flood at once and a rehearsal of the watchdog's full escalation ladder.
+
+## Running It
+
 ```sh
-make test           # unit tests (driver protocol, manager, storage)
-make linux          # static x86_64 binary for the Piconium
+make run-sim     # the whole unit, simulated — http://localhost:8080
+make test        # all 12 packages
+make web         # rebuild the two surfaces and embed them
+make linux       # both static x86-64 binaries for the Piconium → bin/
 ```
 
-## Try the API
+First boot greets you with **Unit Setup** — create the steward account (only
+accepted from the unit's own network), and the rack is yours.
 
-```sh
-curl -s localhost:8080/api/v1/health | jq
-curl -s -X POST localhost:8080/api/v1/relays/2/set \
-  -H 'Content-Type: application/json' \
-  -d '{"state":"on","reason":"pump test","timeout_seconds":10}'
-curl -s localhost:8080/api/v1/relay-actions | jq
-curl -s -X POST localhost:8080/api/v1/relays/all-off
-```
+## Papers on File
 
-## Layout
+| Document | Contents |
+|---|---|
+| [`docs/SPEC.md`](docs/SPEC.md) | The founding specification — architecture, schema, API, safety rules |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Physical inventory, protocols, wiring cautions, relay budget |
+| [`docs/deployment.md`](docs/deployment.md) | Debian 13 on the Piconium, kiosk, serial stability, eMMC & NVMe |
+| [`docs/remote-access.md`](docs/remote-access.md) | Serving `unit01.shortsfieldstation.org` — tunnel, TLS, the trust model |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | The complete working record: decisions, sharp edges, bench checklist |
 
-Follows spec §5. Notable deviations:
+## Station Log
 
-- Migrations live in `internal/storage/migrations/` (Go embed requires them
-  inside the package tree); the full v1.0 schema ships as `001`.
-- Phase 0 web shell is embedded static HTML under `internal/api/static/`;
-  the React app (spec §2.3) arrives in Phase 5 under `web/`.
+Software: **feature-complete and verified in simulation.** Awaiting the
+bench: hardware bring-up, sensor commissioning, register-map verification,
+hardware-in-the-loop safety trials, pump flow calibration, and the tunnel to
+the field station's domain.
 
-## Hardware deployment
+---
 
-See `docs/deployment.md` for the Debian 13 install plan (NVMe root), kiosk
-setup, udev/serial notes, and the `deploy/` scripts.
+<div align="center">
+<sub>SHORT'S RESORT FIELD STATION · GROWTH & RENEWAL · FY·10<br>
+CONFIDENTIAL · WORKING EQUIPMENT · KEEP WATER OFF THE FLOOR</sub>
+</div>
