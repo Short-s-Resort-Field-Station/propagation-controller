@@ -1,13 +1,17 @@
 <div align="center">
 
-<img src="web/public/seal.png" width="110" alt="Dept. of Forestry & Fire — Growth & Renewal">
+<img src="docs/images/seal-forestry.png" width="104" alt="Dept. of Forestry & Fire — Growth & Renewal" align="left">
+<img src="docs/images/seal-sr.png" width="104" alt="Short's Resort — Field Station" align="right">
 
 # PROPAGATION UNIT · No. 01
 
 **SHORT'S RESORT · DEPT. OF FORESTRY & FIRE**
 FIELD STATION INSTRUMENTATION
 
-`FILE NO. SR–PROP–02` · `SOFTWARE & CONTROL` · `FIELD YEAR 01`
+`SR·FY·EQ·01` · `SOFTWARE & CONTROL` · `FIELD YEAR 01`
+
+<br clear="all">
+
 
 *Texas Hill Country · Edwards Plateau · Lampasas River*
 31°07′21.0″N · 98°02′52.9″W
