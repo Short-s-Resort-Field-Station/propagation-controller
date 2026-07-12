@@ -30,11 +30,10 @@ func NewMockBus() *MockBus {
 	return &MockBus{
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 		banks: map[uint8]map[uint16]*driftReg{
-			1: { // soil sensor (values are raw x10)
-				0: {value: 312, min: 250, max: 420, step: 3}, // moisture %
-				1: {value: 225, min: 200, max: 260, step: 2}, // temperature °C
-				2: {value: 550, min: 450, max: 700, step: 4}, // humidity
-				3: {value: 65, min: 58, max: 72, step: 1},    // pH
+			1: { // soil sensor (moisture/temp are raw x10; EC is raw µS/cm)
+				0: {value: 312, min: 250, max: 420, step: 3},      // moisture %
+				1: {value: 225, min: 200, max: 260, step: 2},      // temperature °C
+				2: {value: 1150, min: 900, max: 1450, step: 8},    // substrate EC µS/cm
 			},
 			2: { // reservoir level transmitter
 				0: {value: 820, min: 650, max: 900, step: 2}, // level %

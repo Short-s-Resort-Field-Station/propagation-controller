@@ -81,7 +81,9 @@ func (s *Service) EnsureDefaults() error {
 		Registers: []RegisterSpec{
 			{Name: "moisture", Register: 0, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "%"},
 			{Name: "temperature", Register: 1, FunctionCode: 3, DataType: "int16", Scale: 0.1, Unit: "°C"},
-			{Name: "ph", Register: 3, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "pH"},
+			// ZTS-3000 probe: EC in µS/cm at register 2, no scaling (verified
+			// against the real sensor 2026-07-10; it has no pH channel).
+			{Name: "ec", Register: 2, FunctionCode: 3, DataType: "uint16", Scale: 1, Unit: "µS/cm"},
 		},
 	}
 	reservoir := Config{

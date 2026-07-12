@@ -54,7 +54,7 @@ func TestReadAllAppliesScaleOffsetAndKeys(t *testing.T) {
 		Registers: []RegisterSpec{
 			{Name: "moisture", Register: 0, DataType: "uint16", Scale: 0.1, Unit: "%"},
 			{Name: "temperature", Register: 1, DataType: "int16", Scale: 0.1, Unit: "°C"},
-			{Name: "custom", Register: 3, DataType: "uint16", Scale: 0.1, Unit: "pH", SensorKey: "my_explicit_key"},
+			{Name: "custom", Register: 2, DataType: "uint16", Scale: 1, Unit: "µS/cm", SensorKey: "my_explicit_key"},
 		},
 	}
 	readings, err := ReadAll(context.Background(), bus, "soil_zone_1", cfg)
