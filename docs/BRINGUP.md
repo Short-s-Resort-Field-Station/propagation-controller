@@ -47,6 +47,30 @@ touchscreen, and every safety layer demonstrated against real hardware.
 7. The service binds **:80 via CAP_NET_BIND_SERVICE** (no root, no reverse
    proxy). Kiosk is cage + chromium at `http://localhost/ui/touch`.
 
+## What the 2026-07-12 OS install already established (don't re-learn these)
+
+The base OS is INSTALLED and these facts are verified on the physical machine:
+
+- **It's Kit 002** — Pentium N3710 (Braswell), 4 GB RAM, 500 GB WD Blue SATA
+  M.2 (`/dev/sda`), 14.3 GB eMMC. The Bay Trail `intel_idle.max_cstate=1`
+  workaround is NOT needed on this CPU.
+- Debian 13, **BIOS/legacy boot**, GRUB on `/dev/sda`, root `/dev/sda1` +
+  swap `sda5`. Hostname `srfsprop1`, static-ish at 192.168.1.250 (DHCP),
+  user `anelsen` (sudo), SSH key auth from Austin's Mac (`ssh piconium`).
+- **The debian-installer defaults to the eMMC at partitioning.** If the OS
+  is ever reinstalled: explicitly select the SATA SSD by size/model, and
+  send GRUB to `/dev/sda`. (Round 1 landed on the eMMC this way.)
+- The **eMMC was wiped clean 2026-07-12** (old install + its GRUB). Nothing
+  boots from it; leave it empty or use it as scratch.
+- **Phantom eDP:** the board exposes `eDP-1` that falsely reports a
+  connected panel, which steals the console/KMS output and blanks the real
+  HDMI display. Fixed with `video=eDP-1:d` in GRUB_CMDLINE_LINUX_DEFAULT —
+  do not remove it, the kiosk depends on output landing on HDMI.
+- **Rescue-mode chroot has no DNS**: `echo "nameserver 1.1.1.1" >
+  /etc/resolv.conf` inside the chroot before any apt operation.
+- The graphical installer black-screens on this GPU; always use the text
+  installer.
+
 ## Sequence
 
 Follow `docs/deployment.md` for each step's detail; this is the order and
