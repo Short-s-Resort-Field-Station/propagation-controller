@@ -71,6 +71,47 @@ The base OS is INSTALLED and these facts are verified on the physical machine:
 - The graphical installer black-screens on this GPU; always use the text
   installer.
 
+## Kiosk (installed 2026-07-12 overnight — ONE open item: display output)
+
+The touchscreen kiosk is **built, deployed, enabled, and reboot-verified** at
+the software level:
+
+- Accidental GNOME desktop purged; boot target is `multi-user.target` (no
+  display manager). Network stack (NetworkManager) and SSH deliberately
+  `apt-mark manual`'d first so the purge couldn't strand remote access.
+- `cage seatd chromium grim` installed. `kiosk` user (groups video/input/
+  render). Launch script + service in the repo at `deploy/kiosk/`
+  (`propagation-kiosk.service`, `kiosk-launch.sh` — chromium `--kiosk
+  --ozone-platform=wayland --app=http://localhost/ui/touch`).
+- After a clean reboot, all four services (propagationd, watchdog, seatd,
+  kiosk) come up automatically and chromium loads `/ui/touch` — confirmed via
+  its remote-debug endpoint. The web app itself is fine.
+
+**OPEN ITEM — on-screen output not yet visually confirmed.** Both `grim` and
+chromium's own `Page.captureScreenshot` block with no frame, and cage's debug
+run gives the root cause:
+
+```
+[ERROR] backend/drm/util.c: Failed to parse EDID
+[ERROR] connector HDMI-A-2: drmModeMoveCursor failed: Invalid argument
+```
+
+The **bench monitor's EDID does not parse**, so wlroots/cage can't negotiate a
+video mode and never presents a frame — the screen stays dark even though
+chromium is rendering. This is the likely root cause of the *entire* night's
+display saga (installer black-screens included). It is a display-negotiation
+problem, not a software-config one.
+
+**Next session, with eyes on the panel:** connect the **actual Waveshare 5″
+800×480 touchscreen** (the real target — its EDID may parse cleanly where the
+bench monitor's doesn't) and look. If it's still dark, the fix is to supply a
+forced EDID to the kernel: build a 800×480 (or 1024×768) EDID blob and boot
+with `drm.edid_firmware=HDMI-A-1:edid/<blob>.bin` plus the existing
+`video=HDMI-A-1:...e` force-enable. Do NOT chase this further on the bench
+monitor — verify against the panel that ships with the unit. Console text
+(fbcon) DOES paint at 1024×768, so the hardware path works; only the
+EDID-dependent Wayland modeset is failing.
+
 ## Sequence
 
 Follow `docs/deployment.md` for each step's detail; this is the order and

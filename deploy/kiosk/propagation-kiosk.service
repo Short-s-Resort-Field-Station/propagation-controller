@@ -1,0 +1,22 @@
+[Unit]
+Description=Propagation Unit touchscreen kiosk (cage + chromium)
+After=propagationd.service seatd.service systemd-user-sessions.service
+Wants=propagationd.service
+
+[Service]
+Environment=WLR_DRM_NO_ATOMIC=1
+User=kiosk
+Group=kiosk
+SupplementaryGroups=video input render
+PAMName=login
+TTYPath=/dev/tty7
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+ExecStart=/usr/bin/cage -- /opt/propagation-controller/kiosk-launch.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
