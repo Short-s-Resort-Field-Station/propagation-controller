@@ -11,14 +11,18 @@ PG.STATUS = {
   Healthy:      { col:'var(--i-sage)',    inkCol:'var(--sage-deep)',  sev:'NORMAL' },
   Monitoring:   { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'ATTENTION' },
   Watering:     { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'NORMAL' },
+  Draining:     { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'NORMAL' }, // live-edit (ebb-flow): valve open, pump off, tray draining back
   Dry:          { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'ACTION REQUIRED' },
   'Sensor Fault':{col:'var(--i-oxblood)', inkCol:'var(--oxblood)',    sev:'ACTION REQUIRED' },
   Inactive:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'—' },
+  Maintenance:  { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'PAUSED' },     // change 2: automation suspended
+  Disabled:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'DISABLED' },   // change 2: assigned but paused
 };
 
 PG.RACK_STATUS = {
   Operational: { col:'var(--i-sage)',   ink:'var(--sage-deep)' },
   Watering:    { col:'var(--i-river)',  ink:'var(--river-deep)' },
+  Draining:    { col:'var(--i-river)',  ink:'var(--river-deep)' }, // live-edit (ebb-flow)
   Fault:       { col:'var(--i-oxblood)',ink:'var(--oxblood)' },
   Maintenance: { col:'var(--i-ochre)',  ink:'var(--ochre-deep)' },
 };
@@ -158,13 +162,13 @@ function ArcGauge({ value, lo, hi, accent, size=92, label='MOISTURE' }){
       <path d={arc(aLo,aHi)} fill="none" stroke="#ffffff30" strokeWidth="6" strokeLinecap="butt"/>
       {value>0 && <path d={arc(a0,av)} fill="none" stroke={accent} strokeWidth="6" strokeLinecap="round"/>}
       <text x={cx} y={cy-1} textAnchor="middle" fontFamily="Zilla Slab" fontWeight="900" fontSize={size*0.30} fill="var(--lcd)">{value>0?value:'—'}</text>
-      {value>0 && <text x={cx} y={cy+size*0.16} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" letterSpacing="1" fill="var(--lcd-dim)">%RH</text>}
+      {value>0 && <text x={cx} y={cy+size*0.16} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" letterSpacing="1" fill="var(--lcd-dim)">%VWC</text>}
     </svg>
   );
 }
 
 // SVG line/area chart for the dashboard (paper)
-function LineChart({ datasets, w=820, h=200, pad=28, yMin=40, yMax=85, fmtY=(v)=>v }){
+function LineChart({ datasets, w=820, h=200, pad=38, yMin=40, yMax=85, fmtY=(v)=>v }){
   const innerW=w-pad*2, innerH=h-pad*1.4;
   const n=datasets[0].data.length;
   const X=(i)=>pad+innerW*(i/(n-1));
@@ -173,7 +177,7 @@ function LineChart({ datasets, w=820, h=200, pad=28, yMin=40, yMax=85, fmtY=(v)=
   const area=(d)=>path(d)+`L${X(n-1).toFixed(1)} ${(pad*0.5+innerH).toFixed(1)} L${X(0).toFixed(1)} ${(pad*0.5+innerH).toFixed(1)} Z`;
   const gridY=[yMin,(yMin+yMax)/2,yMax];
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block'}}>
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block',overflow:'visible'}}>
       {gridY.map((g,i)=>(
         <g key={i}>
           <line x1={pad} y1={Y(g)} x2={w-pad} y2={Y(g)} stroke="#1B181322" strokeWidth="1" strokeDasharray={i===0?'0':'2 4'}/>

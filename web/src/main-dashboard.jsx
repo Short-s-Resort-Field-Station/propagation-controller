@@ -100,6 +100,12 @@ function App() {
     () => makeControls(state, actions),
     [state.shelves, actions],
   );
+  // change 3: species-profiles bridge for the assign/edit modal.
+  const profiles = React.useMemo(() => ({
+    list: (speciesId) => api.speciesProfiles(speciesId).then((r) => r.profiles || []),
+    save: (body) => api.createProfile(body),
+    update: (id, body) => api.updateProfile(id, body),
+  }), []);
 
   if (!state.ready || session === undefined) {
     return (
@@ -141,6 +147,11 @@ function App() {
         onAssign={actions.assign}
         getSeries={getSeries}
         controls={controls}
+        maintenance={state.maintenance}
+        onSetMaintenance={actions.setMaintenance}
+        onSetEnabled={actions.setShelfEnabled}
+        onUnassign={actions.unassign}
+        profiles={profiles}
       />
       {showOperators && <OperatorsModal onClose={() => setShowOperators(false)}
         selfName={session ? session.name : ''} />}

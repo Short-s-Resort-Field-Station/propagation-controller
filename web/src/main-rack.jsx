@@ -89,6 +89,9 @@ function App() {
           locked={false}
           connection={state.connection}
           onUnlock={() => {}}
+          maintenance={state.maintenance}
+          onSetMaintenance={actions.setMaintenance}
+          onSetEnabled={actions.setShelfEnabled}
         />
       </div>
     </div>

@@ -38,19 +38,22 @@ function eventColor(e) {
 }
 
 // Build the design's shelf objects from zones + sensors + lighting + rules.
-export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules }) {
+export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, maintenance }) {
   const engine = zonesResp.engine || {};
   const activeZone = engine.active_cycle ? engine.active_cycle.zone_key : null;
+  // live-edit (ebb-flow): the active cycle's fine-grained phase, so the fill
+  // (pump on) and drain-back (pump off, valve open) phases read distinctly.
+  const activeState = engine.active_cycle ? engine.active_cycle.state : null;
   const queuedZones = new Set((engine.queue || []).map((q) => q.zone_key));
 
   // Rack-wide readings (one soil probe in v1 serves temp for all shelves)
-  // plus per-shelf pH keyed by sensor key.
+  // plus per-shelf substrate EC (µS/cm) keyed by sensor key.
   let soilTempF = null;
-  const phByKey = {};
+  const ecByKey = {};
   for (const dev of sensorsResp.sensors || []) {
     for (const m of dev.measurements || []) {
       if (m.name === 'temperature' && m.value != null) soilTempF = cToF(m.value);
-      if (m.name === 'ph' && m.value != null) phByKey[m.sensor_key] = Math.round(m.value * 10) / 10;
+      if (m.name === 'ec' && m.value != null) ecByKey[m.sensor_key] = Math.round(m.value);
     }
   }
 
@@ -67,15 +70,27 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules }
     const moisture = z.latest ? Math.round(z.latest.moisture) : 0;
     const sensorFresh = z.latest && Date.now() - new Date(z.latest.read_at).getTime() < 5 * 60e3;
 
+    // A shelf with a specimen assigned but disabled is *paused* (manual
+    // override or its assignment is mid-change), distinct from a vacant bay.
+    const assigned = !!cfg.species;
+
     // Moisture judgments (Dry/Monitoring) only apply when the shelf actually
     // has a probe reporting — a probe-less shelf is not "dry", it's unmetered.
     let status = 'Healthy';
-    if (!z.enabled) status = 'Inactive';
-    else if (z.zone_key === activeZone) status = 'Watering';
+    if (!z.enabled) status = assigned ? 'Disabled' : 'Inactive';
+    else if (z.zone_key === activeZone) status = activeState === 'draining' ? 'Draining' : 'Watering';
     else if (z.soil_sensor_key && !sensorFresh) status = 'Sensor Fault';
     else if (rule && z.soil_sensor_key && sensorFresh && moisture < lo) status = 'Dry';
     else if (rule && z.soil_sensor_key && sensorFresh && moisture < lo + 3) status = 'Monitoring';
     else if (queuedZones.has(z.zone_key)) status = 'Monitoring';
+
+    // change 2 (maintenance): while maintenance mode is on, calm the per-shelf
+    // moisture/probe alarms (pulling probes or moving trays shouldn't raise
+    // Sensor Fault / Dry / Monitoring). The readings still display; only the
+    // alarm is suppressed. Watering/Disabled/Inactive are left untouched.
+    if (maintenance && (status === 'Sensor Fault' || status === 'Dry' || status === 'Monitoring')) {
+      status = 'Maintenance';
+    }
 
     const last = z.last_cycle;
     const species1 = cfg.species || (z.enabled ? z.name : 'Unassigned');
@@ -88,17 +103,37 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules }
       n,
       zoneKey: z.zone_key,
       active: z.enabled,
+      // change 2: a paused shelf (assigned but disabled) vs a vacant bay.
+      assigned,
       species,
       tag,
+      // change 3 (species profiles): monitoring-only happy-band ranges + the
+      // applied-profile linkage, surfaced for the gauges, adherence tracking,
+      // and the edit/save-profile flow.
+      ecBand: (cfg.ec_min != null && cfg.ec_max != null) ? [cfg.ec_min, cfg.ec_max] : null,
+      tempBand: (cfg.temp_min_f != null && cfg.temp_max_f != null) ? [cfg.temp_min_f, cfg.temp_max_f] : null,
+      speciesId: cfg.species_id || '',
+      profileId: cfg.profile_id || 0,
+      profileName: cfg.profile_name || '',
+      stage: cfg.stage || '',
       // Raw fields for the quick-edit modal (display strings above are joined).
       raw: {
         species1: cfg.species || '',
         species2: cfg.species2 || '',
         durMin: rule ? Math.max(1, Math.round(rule.run_duration_seconds / 60)) : 0,
+        // live-edit (ebb-flow): drain-back time (valve holds open), minutes.
+        drainMin: Math.max(0, Math.round((cfg.drain_seconds ?? 300) / 60)),
+        // change 3: EC/temp target ranges for the edit modal (happy band).
+        ecLo: cfg.ec_min ?? null, ecHi: cfg.ec_max ?? null,
+        tempLo: cfg.temp_min_f ?? null, tempHi: cfg.temp_max_f ?? null,
+        speciesId: cfg.species_id || '', profileId: cfg.profile_id || 0, stage: cfg.stage || '',
+        // change 3: moisture guards (for round-tripping a shelf → saved profile).
+        coolMin: rule ? rule.minimum_interval_minutes : null,
+        maxCycles: rule ? rule.max_cycles_per_day : null,
       },
       moisture: z.enabled ? moisture : 0,
       temp: z.enabled && soilTempF != null ? soilTempF : 0,
-      ph: z.enabled ? (phByKey[`soil_zone_${i + 1}_ph`] ?? null) : null,
+      ec: z.enabled ? (ecByKey[`soil_zone_${i + 1}_ec`] ?? null) : null,
       lo: lo || 40,
       hi: hi || 70,
       light: lightOn,
@@ -120,11 +155,33 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules }
   });
 }
 
-export function buildRackStatus({ health, safety, zonesResp }) {
+export function buildRackStatus({ health, safety, zonesResp, maintenance }) {
   if (safety.emergency_stop && safety.emergency_stop.active) return 'Fault';
   if (health.status !== 'ok') return 'Fault';
-  if (zonesResp.engine && zonesResp.engine.active_cycle) return 'Watering';
+  if (zonesResp.engine && zonesResp.engine.active_cycle) {
+    // live-edit (ebb-flow): distinguish the drain-back phase in the rack header.
+    // A cycle in progress (e.g. a manual water during maintenance) still reads
+    // as Watering/Draining; the maintenance banner shows the mode separately.
+    return zonesResp.engine.active_cycle.state === 'draining' ? 'Draining' : 'Watering';
+  }
+  // change 2 (maintenance): the rack header reads Maintenance while suspended,
+  // unless a safety fault or an active cycle takes precedence above.
+  if (maintenance) return 'Maintenance';
   return 'Operational';
+}
+
+// change 2 (maintenance): read the maintenance switch from GET /settings.
+// The settings endpoint returns each value as raw JSON, which arrives here
+// already parsed; tolerate a stringified value too.
+export function buildMaintenance(settingsResp) {
+  const m = settingsResp && settingsResp.settings ? settingsResp.settings.maintenance : null;
+  if (m == null) return false;
+  try {
+    const obj = typeof m === 'string' ? JSON.parse(m) : m;
+    return !!(obj && obj.active);
+  } catch {
+    return false;
+  }
 }
 
 export function buildLog(eventsResp) {
@@ -149,12 +206,17 @@ export function buildReservoir(sensorsResp) {
 // Map the backend species register onto the AssignModal's catalog shape.
 export function buildSpeciesCatalog(speciesResp) {
   return (speciesResp.species || []).map((s) => ({
+    id: s.id, // change 3: carry the botanical ID so profiles can key off it
     species: s.common_name,
     tag: s.latin_name.toUpperCase(),
     hab: s.category.charAt(0).toUpperCase() + s.category.slice(1) +
       ' · ' + s.method + ' · difficulty ' + s.difficulty + '/5',
     category: s.category,
     lo: 40, hi: 70, temp: 75, onH: 6, offH: 19, fan: 1,
+    // change 3: default happy-band ranges (monitoring only) until a profile
+    // or manual entry overrides them. EC in µS/cm — propagation cuttings/
+    // seedlings generally want a low-salts substrate (~500–1500).
+    ecLo: 500, ecHi: 1500, tempLo: 68, tempHi: 78,
     stripe: CAT_STRIPE[s.category] || 'var(--sage)',
   }));
 }

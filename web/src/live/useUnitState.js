@@ -7,7 +7,7 @@ import { api } from './api.js';
 import { PG } from '../design/data.jsx';
 import {
   buildShelves, buildRackStatus, buildLog, buildReservoir,
-  buildSpeciesCatalog, fmtClock,
+  buildSpeciesCatalog, buildMaintenance, fmtClock,
 } from './adapter.js';
 
 // With SSE connected, pushes drive instant refreshes and polling drops to a
@@ -28,17 +28,20 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
     log: [],
     clock: fmtClock(),
     estop: false,
+    maintenance: false,
   });
   const rulesRef = React.useRef({});
   const tickRef = React.useRef(0);
 
   const refresh = React.useCallback(async () => {
     try {
-      const [health, zonesResp, sensorsResp, lighting, relays, eventsResp, safety] =
+      const [health, zonesResp, sensorsResp, lighting, relays, eventsResp, safety, settingsResp] =
         await Promise.all([
           api.health(), api.zones(), api.sensors(), api.lighting(),
           api.relays(), api.events(10), api.safety(),
+          api.settings().catch(() => ({ settings: {} })),
         ]);
+      const maintenance = buildMaintenance(settingsResp);
 
       if (tickRef.current % RULES_EVERY === 0) {
         const rules = {};
@@ -55,12 +58,13 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
       setState({
         ready: true,
         connection: 'online',
-        shelves: buildShelves({ zonesResp, sensorsResp, lighting, relays, rules: rulesRef.current }),
+        shelves: buildShelves({ zonesResp, sensorsResp, lighting, relays, rules: rulesRef.current, maintenance }),
         reservoir: buildReservoir(sensorsResp),
-        rackStatus: buildRackStatus({ health, safety, zonesResp }),
+        rackStatus: buildRackStatus({ health, safety, zonesResp, maintenance }),
         log: buildLog(eventsResp),
         clock: fmtClock(),
         estop: !!(safety.emergency_stop && safety.emergency_stop.active),
+        maintenance,
       });
     } catch {
       setState((s) => ({ ...s, connection: 'offline', clock: fmtClock() }));
@@ -115,6 +119,17 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
       .then(refresh).catch((e) => console.error('lights:', e.message)),
     fans: (on) => api.setRelay(7, on ? 'on' : 'off', surface, 'circulation fans')
       .then(refresh).catch((e) => console.error('fans:', e.message)),
+    // change 2 (maintenance): system-wide suspend of irrigation automation.
+    setMaintenance: (active) => api.setMaintenance(active)
+      .then(refresh).catch((e) => console.error('maintenance:', e.message)),
+    // change 2 (per-shelf disable): manual override — pause/resume a shelf's
+    // sensors + valve without touching its assignment.
+    setShelfEnabled: (n, enabled) => api.patchZone('zone_' + Number(n), { enabled })
+      .then(refresh).catch((e) => console.error('setEnabled:', e.message)),
+    // change 2: clear a shelf's assignment → auto-disable (sensors + valve).
+    unassign: (n) => api.patchZone('zone_' + Number(n), {
+      species: '', species_latin: '', species2: '', species2_latin: '', enabled: false,
+    }).then(refresh).catch((e) => console.error('unassign:', e.message)),
     assign: async (n, fields) => {
       const zoneKey = 'zone_' + Number(n);
       try {
@@ -124,6 +139,18 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
           species2: fields.species2 || '',
           species2_latin: fields.tag2 || '',
           enabled: true,
+          // live-edit (ebb-flow): drain-back time — valve holds open after pump stops.
+          drain_seconds: (fields.drainMin != null ? fields.drainMin : 5) * 60,
+          // change 3: monitoring-only EC/temp happy-band + applied-profile
+          // linkage (0 clears a bound, so an unset range removes any old band).
+          ec_min: fields.ecLo ?? 0,
+          ec_max: fields.ecHi ?? 0,
+          temp_min_f: fields.tempLo ?? 0,
+          temp_max_f: fields.tempHi ?? 0,
+          species_id: fields.speciesId || '',
+          profile_id: fields.profileId || 0,
+          profile_name: fields.profileName || '',
+          stage: fields.stage || '',
         });
         // Moisture band + soak time → a real moisture-control rule.
         const existing = await api.moistureControl(zoneKey).catch(() => null);
@@ -135,8 +162,12 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
           trigger_below: fields.lo,
           recovered_above: fields.hi,
           run_duration_seconds: (fields.durMin || 5) * 60,
-          minimum_interval_minutes: (rule && rule.minimum_interval_minutes) || 240,
-          max_cycles_per_day: (rule && rule.max_cycles_per_day) || 4,
+          // change 3: a profile may carry cooldown + daily-cap; else keep the
+          // existing rule's values (or the defaults).
+          minimum_interval_minutes: fields.minIntervalMin != null ? fields.minIntervalMin
+            : ((rule && rule.minimum_interval_minutes) || 240),
+          max_cycles_per_day: fields.maxCycles != null ? fields.maxCycles
+            : ((rule && rule.max_cycles_per_day) || 4),
           sensor_offline_behavior: (rule && rule.sensor_offline_behavior) || 'lockout',
         }).catch(() => { /* zone may have no probe yet; assignment still stands */ });
         // Photoperiod from the modal is rack-wide (one lighting circuit).

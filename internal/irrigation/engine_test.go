@@ -69,6 +69,23 @@ func newFixture(t *testing.T) *fixture {
 	if err := engine.SeedDefaults(); err != nil {
 		t.Fatalf("seed zones: %v", err)
 	}
+	// The ebb-and-flow default drain (5 min) would make every generic cycle
+	// test wait out the drain phase. Reset seeded zones to zero drain here;
+	// the drain phase itself is exercised by TestDrainPhaseHoldsValveOpen.
+	for _, zk := range []string{"zone_1", "zone_2", "zone_3", "zone_4"} {
+		z, err := zones.GetByKey(zk)
+		if err != nil || z == nil {
+			continue
+		}
+		var zc ZoneConfig
+		_ = json.Unmarshal([]byte(z.ConfigJSON), &zc)
+		zc.DrainSeconds = 0
+		b, _ := json.Marshal(zc)
+		z.ConfigJSON = string(b)
+		if err := zones.Update(*z); err != nil {
+			t.Fatalf("reset zone drain: %v", err)
+		}
+	}
 	engine.Start(ctx)
 
 	f := &fixture{engine: engine, mgr: mgr, sup: sup, zones: zones, cycles: cycles,
@@ -278,4 +295,52 @@ func TestMoistureTargetEndsFloodEarly(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("cycle took %v; moisture target should have ended it early", elapsed)
 	}
+}
+
+// TestDrainPhaseHoldsValveOpen verifies the ebb-and-flow drain-back: after the
+// pump stops the shelf's valve stays OPEN for the drain window, the pump is
+// off, and the next shelf cannot start until that valve finally closes.
+func TestDrainPhaseHoldsValveOpen(t *testing.T) {
+	f := newFixture(t)
+	z, _ := f.zones.GetByKey("zone_1")
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 3})
+	z.ConfigJSON = string(cfg)
+	if err := f.zones.Update(*z); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue zone_1: %v", err)
+	}
+
+	// Wait for the drain phase: pump OFF while zone_1's valve (ch 3) stays OPEN.
+	drainSeen := false
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		if f.relayState(t, devices.PumpChannel) == relay.Off && f.relayState(t, 3) == relay.On {
+			drainSeen = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !drainSeen {
+		t.Fatal("never observed drain phase (pump off, valve open)")
+	}
+
+	// Request zone_2 during zone_1's drain: its valve (ch 4) must stay closed
+	// and zone_1's valve must still be open — one shelf at a time, drain included.
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_2", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue zone_2: %v", err)
+	}
+	if f.relayState(t, 4) != relay.Off {
+		t.Error("zone_2 valve opened while zone_1 was still draining")
+	}
+	if f.relayState(t, 3) != relay.On {
+		t.Error("zone_1 valve closed before its drain completed")
+	}
+
+	// zone_1 completes and its valve closes; only then does zone_2 run.
+	f.waitCycleResult(t, "zone_1", ResultComplete, 8*time.Second)
+	if f.relayState(t, 3) != relay.Off {
+		t.Error("zone_1 valve still open after cycle complete")
+	}
+	f.waitCycleResult(t, "zone_2", ResultComplete, 8*time.Second)
 }

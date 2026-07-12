@@ -97,6 +97,22 @@ func newFixture(t *testing.T) *fixture {
 	if err := engine.SeedDefaults(); err != nil {
 		t.Fatalf("seed zones: %v", err)
 	}
+	// Zero the ebb-and-flow default drain so automation cycles complete within
+	// the test window (the drain phase is covered in the irrigation package).
+	for _, zk := range []string{"zone_1", "zone_2", "zone_3", "zone_4"} {
+		z, err := zones.GetByKey(zk)
+		if err != nil || z == nil {
+			continue
+		}
+		var zc irrigation.ZoneConfig
+		_ = json.Unmarshal([]byte(z.ConfigJSON), &zc)
+		zc.DrainSeconds = 0
+		b, _ := json.Marshal(zc)
+		z.ConfigJSON = string(b)
+		if err := zones.Update(*z); err != nil {
+			t.Fatalf("reset zone drain: %v", err)
+		}
+	}
 	engine.Start(ctx)
 
 	f := &fixture{
@@ -176,6 +192,56 @@ func TestMoistureTriggerEnqueuesCycle(t *testing.T) {
 	if cycles[0].TriggerSource == nil || *cycles[0].TriggerSource != "soil_zone_1_moisture" {
 		t.Errorf("trigger_source = %v", cycles[0].TriggerSource)
 	}
+}
+
+// Maintenance mode must suspend moisture-triggered watering (pulling probes /
+// moving trays shouldn't fire pumps) and resume cleanly when switched off.
+func TestMaintenanceModeSuspendsAutomation(t *testing.T) {
+	f := newFixture(t)
+	f.seedRule(t, nil)
+	f.insertReading(t, "soil_zone_1_moisture", 22, f.now) // below trigger (28)
+
+	if err := f.svc.settings.Set("maintenance", `{"active":true}`); err != nil {
+		t.Fatalf("set maintenance: %v", err)
+	}
+	f.svc.Tick()
+	time.Sleep(300 * time.Millisecond)
+	if cycles, _ := f.cycles.List("zone_1", 50); len(cycles) != 0 {
+		t.Fatalf("maintenance mode watered anyway: %d cycles", len(cycles))
+	}
+
+	// Exit maintenance: the same below-threshold reading now waters.
+	if err := f.svc.settings.Set("maintenance", `{"active":false}`); err != nil {
+		t.Fatalf("clear maintenance: %v", err)
+	}
+	f.svc.Tick()
+	f.waitCycles(t, "zone_1", 1, 5*time.Second)
+}
+
+// A disabled shelf (assignment cleared, or manually disabled) must never be
+// watered by automation, and must water again once re-enabled (re-assigned).
+func TestDisabledZoneNotWateredByAutomation(t *testing.T) {
+	f := newFixture(t)
+	f.seedRule(t, nil)
+	f.insertReading(t, "soil_zone_1_moisture", 22, f.now) // below trigger (28)
+
+	zone, _ := f.zones.GetByKey("zone_1")
+	zone.Enabled = false
+	if err := f.zones.Update(*zone); err != nil {
+		t.Fatalf("disable zone: %v", err)
+	}
+	f.svc.Tick()
+	time.Sleep(300 * time.Millisecond)
+	if cycles, _ := f.cycles.List("zone_1", 50); len(cycles) != 0 {
+		t.Fatalf("disabled shelf watered anyway: %d cycles", len(cycles))
+	}
+
+	zone.Enabled = true
+	if err := f.zones.Update(*zone); err != nil {
+		t.Fatalf("re-enable zone: %v", err)
+	}
+	f.svc.Tick()
+	f.waitCycles(t, "zone_1", 1, 5*time.Second)
 }
 
 func TestHysteresisPreventsRetrigger(t *testing.T) {

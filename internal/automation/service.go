@@ -129,6 +129,42 @@ func (s *Service) Enabled() bool {
 	return *v.Enabled
 }
 
+// MaintenanceActive reports the system maintenance switch (settings key
+// "maintenance"). While it's on, all irrigation automation is suspended so
+// pulling moisture probes or moving trays can't fire a pump; lighting is
+// untouched (it's driven by the lighting service, not here) and manual
+// watering still works through the API. Default off.
+func (s *Service) MaintenanceActive() bool {
+	raw, ok, err := s.settings.Get("maintenance")
+	if err != nil || !ok {
+		return false
+	}
+	var v struct {
+		Active *bool `json:"active"`
+	}
+	if json.Unmarshal([]byte(raw), &v) != nil || v.Active == nil {
+		return false
+	}
+	return *v.Active
+}
+
+// enabledZones maps zone_key → enabled. A disabled shelf (e.g. its plant
+// assignment was cleared) must never be watered by automation even if a stale
+// moisture rule or schedule still points at it. On a lookup error every zone
+// reads as disabled — fail-safe: skip watering rather than risk over-watering.
+func (s *Service) enabledZones() map[string]bool {
+	out := map[string]bool{}
+	zones, err := s.zones.List()
+	if err != nil {
+		s.log.Error().Err(err).Msg("automation: cannot list zones; skipping this pass")
+		return out
+	}
+	for _, z := range zones {
+		out[z.ZoneKey] = z.Enabled
+	}
+	return out
+}
+
 // Tick runs one evaluation pass (exported for tests).
 func (s *Service) Tick() {
 	now := s.nowFn()
@@ -140,13 +176,21 @@ func (s *Service) Tick() {
 	if !s.Enabled() {
 		return
 	}
-	s.evaluateSchedules(last, now)
-	s.evaluateMoistureRules(now)
+	// Maintenance mode suspends both automation paths (moisture + schedules).
+	// Like a disabled switch, missed schedule slots simply skip (§11.2) — they
+	// don't retroactively fire when maintenance ends, because lastCheck has
+	// already advanced past them.
+	if s.MaintenanceActive() {
+		return
+	}
+	enabled := s.enabledZones()
+	s.evaluateSchedules(last, now, enabled)
+	s.evaluateMoistureRules(now, enabled)
 }
 
 // --- scheduled irrigation ---
 
-func (s *Service) evaluateSchedules(last, now time.Time) {
+func (s *Service) evaluateSchedules(last, now time.Time, enabled map[string]bool) {
 	rows, err := s.schedules.ListByType("irrigation")
 	if err != nil {
 		s.log.Error().Err(err).Msg("automation: cannot list irrigation schedules")
@@ -160,6 +204,9 @@ func (s *Service) evaluateSchedules(last, now time.Time) {
 		if err := json.Unmarshal([]byte(row.RuleJSON), &rule); err != nil {
 			s.log.Error().Err(err).Str("schedule", row.ScheduleKey).Msg("automation: bad schedule rule")
 			continue
+		}
+		if !enabled[rule.ZoneKey] {
+			continue // shelf disabled — skip quietly
 		}
 		if !fires(rule, row.Timezone, last, now) {
 			continue
@@ -220,18 +267,21 @@ func fires(rule ScheduleRule, timezone string, last, now time.Time) bool {
 
 // --- moisture-triggered irrigation ---
 
-func (s *Service) evaluateMoistureRules(now time.Time) {
+func (s *Service) evaluateMoistureRules(now time.Time, enabled map[string]bool) {
 	rules, err := s.rules.ListEnabled()
 	if err != nil {
 		s.log.Error().Err(err).Msg("automation: cannot list moisture rules")
 		return
 	}
 	for _, rule := range rules {
-		s.evaluateMoistureRule(rule, now)
+		s.evaluateMoistureRule(rule, now, enabled)
 	}
 }
 
-func (s *Service) evaluateMoistureRule(rule storage.MoistureRule, now time.Time) {
+func (s *Service) evaluateMoistureRule(rule storage.MoistureRule, now time.Time, enabled map[string]bool) {
+	if !enabled[rule.ZoneKey] {
+		return // shelf disabled — automation never waters it
+	}
 	latest, err := s.readings.Latest(rule.SensorKey)
 	if err != nil {
 		return

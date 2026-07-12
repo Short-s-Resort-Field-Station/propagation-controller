@@ -36,7 +36,7 @@
   width: auto; height: auto; background: transparent; border-radius: 0;
 }
 
-/* Three reading cards (moisture · temperature · pH) on the detail screen. */
+/* Three reading cards (moisture · root zone temp · substrate EC) on the detail screen. */
 .rk2-dread.three { grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 .rk2-dread.three .rk2-card { padding: 12px 14px; gap: 12px; min-width: 0; }
 .rk2-dread.three .rk2-card .meta { min-width: 0; }

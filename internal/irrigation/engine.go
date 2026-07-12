@@ -46,8 +46,11 @@ const (
 // ZoneConfig is the per-zone config_json payload.
 type ZoneConfig struct {
 	DefaultRunSeconds int `json:"default_run_seconds"`
-	// DrainSeconds keeps the valve open after the pump stops. Austin's
-	// plumbing closes the valve with the pump, so the default is 0.
+	// DrainSeconds keeps the shelf's valve open after the pump stops so the
+	// tray drains back through the (now off) pump — the ebb-and-flow model
+	// (Austin swapped to a drain-back pump, 2026-07-09). The next shelf does
+	// not start until this drain completes and the valve closes. Default 300 s
+	// (5 min); adjustable per zone.
 	DrainSeconds int `json:"drain_seconds"`
 	// TargetMoisture ends flooding early once the zone's soil sensor reads
 	// at or above this value. The run duration remains the hard cap.
@@ -58,6 +61,21 @@ type ZoneConfig struct {
 	SpeciesLatin  string `json:"species_latin,omitempty"`
 	Species2      string `json:"species2,omitempty"`
 	Species2Latin string `json:"species2_latin,omitempty"`
+
+	// change 3 (species profiles): monitoring-only target RANGES — the unit
+	// senses EC/temperature but does not control them. These drive the gauge
+	// "happy band" and the Environmental time-in-range tracking; nil = no band.
+	// EC is substrate conductivity in µS/cm (ZTS-3000 probe, register 2).
+	ECMin    *float64 `json:"ec_min,omitempty"`
+	ECMax    *float64 `json:"ec_max,omitempty"`
+	TempMinF *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF *float64 `json:"temp_max_f,omitempty"`
+	// Which saved profile is applied to this shelf (for display + "update the
+	// profile from the current shelf"). SpeciesID matches the species catalog.
+	SpeciesID   string `json:"species_id,omitempty"`
+	ProfileID   int64  `json:"profile_id,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
+	Stage       string `json:"stage,omitempty"`
 }
 
 type Request struct {
@@ -127,7 +145,7 @@ func (e *Engine) SeedDefaults() error {
 	}
 	// Flood caps sized for the largest pots: soaks can run up to 30 minutes
 	// (Austin, 2026-07-06).
-	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 0})
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 300})
 	soil1 := "soil_zone_1_moisture"
 	seeds := []storage.Zone{
 		{ZoneKey: "zone_1", Name: "Shelf 1", ValveRelayChannel: 3, SoilSensorKey: &soil1,

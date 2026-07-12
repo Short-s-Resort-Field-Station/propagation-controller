@@ -38,12 +38,28 @@ export const api = {
   events: (limit = 8) => req(`/events?limit=${limit}`),
   safety: () => req('/safety/status'),
   species: () => req('/species'),
+  // change 3: species profiles (per-species, per-stage saved settings).
+  speciesProfiles: (speciesId) => req('/species-profiles' + (speciesId ? `?species=${encodeURIComponent(speciesId)}` : '')),
+  createProfile: (body) => post('/species-profiles', body),
+  updateProfile: (id, body) => req(`/species-profiles/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  deleteProfile: (id) => req(`/species-profiles/${id}`, { method: 'DELETE' }),
   cycles: (limit = 50) => req(`/irrigation/cycles?limit=${limit}`),
   moistureControl: (zoneKey) => req(`/irrigation/zones/${zoneKey}/moisture-control`),
   readings: (sensorKey, limit = 500) => req(`/sensors/${sensorKey}/readings?limit=${limit}`),
   aggregates: (sensorKey, fromISO) =>
     req(`/sensors/${sensorKey}/readings?interval=hour&from=${encodeURIComponent(fromISO)}`),
   lightingSchedule: () => req('/lighting/schedule'),
+  settings: () => req('/settings'),
+  putSettings: (body) => req('/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  // change 2 (maintenance): system-wide suspend of irrigation automation.
+  setMaintenance: (active) => req('/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ maintenance: { active } }),
+  }),
 
   runZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/run`, { actor, reason: 'water now' }),
   stopZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/stop`, { actor }),

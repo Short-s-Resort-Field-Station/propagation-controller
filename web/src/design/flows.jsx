@@ -9,12 +9,43 @@ import { PG } from './data.jsx';
 const fmtH = h => String(h).padStart(2,'0') + ':00';
 
 // ---- small stepper (accepts value or functional updater via set) ----
-function Stepper({ v, set, min, max, unit }){
+// change 3: optional `step` (e.g. 50 for EC µS/cm); integer behaviour when step=1.
+function Stepper({ v, set, min, max, unit, step=1 }){
+  const snap = (x)=> Math.round(x/step)*step;
+  const fmt = (x)=> step<1 ? (Math.round(x*10)/10).toFixed(1) : x;
   return (
     <div className="fx-step">
-      <button onClick={()=>set(x=>Math.max(min, x-1))} aria-label="decrease">&minus;</button>
-      <div className="v">{v}<small>{unit}</small></div>
-      <button onClick={()=>set(x=>Math.min(max, x+1))} aria-label="increase">&#43;</button>
+      <button onClick={()=>set(x=>Math.max(min, snap(x-step)))} aria-label="decrease">&minus;</button>
+      <div className="v">{fmt(v)}<small>{unit}</small></div>
+      <button onClick={()=>set(x=>Math.min(max, snap(x+step)))} aria-label="increase">&#43;</button>
+    </div>
+  );
+}
+
+// change 3 · design pass — compact typed number field. Replaces the modal's
+// stepper wall: calmer, fits two-up, type or use arrow keys. Clamps on blur so
+// intermediate typing ("6"→"60") isn't fought; empty is tolerated until blur.
+function NumField({ v, set, min, max, step=1, unit }){
+  return (
+    <span className="asg-range">
+      <input type="number" className="asg-num" value={v} min={min} max={max} step={step}
+        onChange={e=>{ const r=e.target.value; if(r===''){ set(''); return; } const n=step<1?parseFloat(r):parseInt(r,10); if(!isNaN(n)) set(n); }}
+        onBlur={()=>set(x=>{ const n=Number(x); return isNaN(n)?min:Math.max(min,Math.min(max,n)); })}/>
+      {unit && <span className="asg-unit">{unit}</span>}
+    </span>
+  );
+}
+// Low–high pair, e.g. a moisture / EC / temperature target band.
+function RangeField({ lo, hi, setLo, setHi, min, max, step=1, unit, ok=true }){
+  return (
+    <div>
+      <div className="asg-range">
+        <NumField v={lo} set={setLo} min={min} max={max} step={step}/>
+        <span className="asg-dash">to</span>
+        <NumField v={hi} set={setHi} min={min} max={max} step={step}/>
+        {unit && <span className="asg-unit">{unit}</span>}
+      </div>
+      {!ok && <div className="fx-warn">Low must be below high</div>}
     </div>
   );
 }
@@ -54,10 +85,16 @@ function PhotoRail({ onH, hours }){
   );
 }
 
-// Assignment and quick-edit share this modal. Pass `initial` to edit an
-// occupied shelf. Photoperiod is "lights on at + hours of light" so on/off
-// can never add up to more than a day; a shelf may carry a second specimen.
-function AssignModal({ shelfN, onAssign, onClose, initial }){
+// change 3 · design pass: propagation-stage presets; free text allowed too.
+const STAGE_PRESETS = ['Seeds','Seedlings','Cuttings','Trimmings','Suckers','Saplings'];
+
+// Assignment and quick-edit share this modal, laid out in labeled sections:
+// Specimen & Profile · Watering · Monitoring targets · Lighting. Photoperiod is
+// "lights on at + hours of light" so on/off can never add up to more than a day;
+// a shelf may carry a second specimen. With a `profiles` bridge ({list,save,
+// update}) the modal also picks/saves species profiles and edits the EC/temp
+// monitoring happy-bands.
+function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, profiles }){
   const cat = PG.SPECIES;
   const findIdx = (name)=>{ const k=cat.findIndex(s=>s.species===name); return k<0?0:k; };
   const [i, setI] = React.useState(initial && initial.species ? findIdx(initial.species) : 0);
@@ -67,24 +104,98 @@ function AssignModal({ shelfN, onAssign, onClose, initial }){
   const [lo,setLo]   = React.useState(initial?initial.lo:sp.lo);
   const [hi,setHi]   = React.useState(initial?initial.hi:sp.hi);
   const [durMin,setDurMin] = React.useState(initial && initial.durMin ? initial.durMin : 5);
+  // live-edit (ebb-flow): drain-back time — valve holds open after the pump stops.
+  const [drainMin,setDrainMin] = React.useState(initial && initial.drainMin!=null ? initial.drainMin : 5);
   const [onH,setOnH] = React.useState(initial && initial.onH!=null ? initial.onH : sp.onH);
   const [lightHrs,setLightHrs] = React.useState(
     initial && initial.lightHrs!=null ? initial.lightHrs : Math.max(1,(sp.offH-sp.onH+24)%24));
-  const pick = k => { const s=cat[k]; setI(k); setLo(s.lo); setHi(s.hi); setOnH(s.onH); setLightHrs(Math.max(1,(s.offH-s.onH+24)%24)); };
-  const bandOk = lo < hi;
+  // change 3: monitoring-only EC / temperature happy-bands + carried moisture
+  // guards (cooldown / daily cap) so a saved profile round-trips fully.
+  const [ecLo,setEcLo] = React.useState(initial && initial.ecLo!=null ? initial.ecLo : sp.ecLo);
+  const [ecHi,setEcHi] = React.useState(initial && initial.ecHi!=null ? initial.ecHi : sp.ecHi);
+  const [tempLo,setTempLo] = React.useState(initial && initial.tempLo!=null ? initial.tempLo : sp.tempLo);
+  const [tempHi,setTempHi] = React.useState(initial && initial.tempHi!=null ? initial.tempHi : sp.tempHi);
+  const [coolMin,setCoolMin] = React.useState(initial && initial.coolMin!=null ? initial.coolMin : 240);
+  const [maxCycles,setMaxCycles] = React.useState(initial && initial.maxCycles!=null ? initial.maxCycles : 4);
+  const [profList,setProfList] = React.useState([]);
+  const [profId,setProfId] = React.useState(initial && initial.profileId ? initial.profileId : 0);
+  const [stage,setStage] = React.useState(initial && initial.stage ? initial.stage : '');
+  const [customStage,setCustomStage] = React.useState(!!(initial && initial.stage && !STAGE_PRESETS.includes(initial.stage)));
+  const [profName,setProfName] = React.useState('');
+  const [showSave,setShowSave] = React.useState(false);
+  const [saveMsg,setSaveMsg] = React.useState('');
+
+  React.useEffect(()=>{
+    let alive=true;
+    if(profiles && profiles.list && sp.id){
+      profiles.list(sp.id).then(list=>{ if(alive) setProfList(list||[]); }).catch(()=>{ if(alive) setProfList([]); });
+    } else setProfList([]);
+    return ()=>{ alive=false; };
+  }, [sp.id, profiles]);
+
+  const applyProfile = (p)=>{
+    setProfId(p.id);
+    setStage(p.stage||''); setCustomStage(!!(p.stage && !STAGE_PRESETS.includes(p.stage)));
+    const s = p.settings||{};
+    if(s.moisture){
+      if(s.moisture.trigger_below!=null) setLo(Math.round(s.moisture.trigger_below));
+      if(s.moisture.recovered_above!=null) setHi(Math.round(s.moisture.recovered_above));
+      if(s.moisture.run_duration_seconds!=null) setDurMin(Math.max(1,Math.round(s.moisture.run_duration_seconds/60)));
+      if(s.moisture.drain_seconds!=null) setDrainMin(Math.max(0,Math.round(s.moisture.drain_seconds/60)));
+      if(s.moisture.minimum_interval_minutes!=null) setCoolMin(s.moisture.minimum_interval_minutes);
+      if(s.moisture.max_cycles_per_day!=null) setMaxCycles(s.moisture.max_cycles_per_day);
+    }
+    if(s.ec){ setEcLo(s.ec.min); setEcHi(s.ec.max); }
+    if(s.temp){ setTempLo(s.temp.min); setTempHi(s.temp.max); }
+  };
+  const onPickProfile = (id)=>{ if(!id){ setProfId(0); return; } const p=profList.find(x=>x.id===id); if(p) applyProfile(p); };
+  const onPickStage = (v)=>{ if(v==='__custom'){ setCustomStage(true); } else { setCustomStage(false); setStage(v); } };
+
+  const pick = k => { const s=cat[k]; setI(k); setLo(s.lo); setHi(s.hi); setOnH(s.onH); setLightHrs(Math.max(1,(s.offH-s.onH+24)%24));
+    setEcLo(s.ecLo); setEcHi(s.ecHi); setTempLo(s.tempLo); setTempHi(s.tempHi); setProfId(0); };
+
+  const bandOk = lo < hi, ecOk = ecLo < ecHi, tempOk = tempLo < tempHi;
+  const allOk = bandOk && ecOk && tempOk;
   const offH = (onH+lightHrs)%24;
   const editing = !!initial;
-  const submit = () => { if(!bandOk) return;
+  const appliedProf = profList.find(p=>p.id===profId);
+
+  const settingsPayload = ()=>({
+    moisture:{ trigger_below:lo, recovered_above:hi, run_duration_seconds:durMin*60, drain_seconds:drainMin*60,
+      minimum_interval_minutes:coolMin, max_cycles_per_day:maxCycles },
+    ec:{ min:ecLo, max:ecHi }, temp:{ min:tempLo, max:tempHi },
+  });
+  const refreshProfiles = ()=>{ if(profiles && profiles.list && sp.id) profiles.list(sp.id).then(l=>setProfList(l||[])).catch(()=>{}); };
+  const doSaveNew = ()=>{
+    if(!profiles || !profiles.save || !allOk) { if(!allOk) setSaveMsg('Fix the ranges first'); return; }
+    const name = (profName||'').trim() || `${sp.species}${stage?' · '+stage:''}`;
+    profiles.save({ species_id: sp.id, stage, name, settings: settingsPayload() })
+      .then(p=>{ setProfId(p.id); setSaveMsg('Saved “'+name+'”'); setShowSave(false); refreshProfiles(); })
+      .catch(e=>setSaveMsg(e.message||'save failed'));
+  };
+  const doUpdate = ()=>{
+    if(!profiles || !profiles.update || !appliedProf || !allOk) { if(!allOk) setSaveMsg('Fix the ranges first'); return; }
+    profiles.update(appliedProf.id, { name: appliedProf.name, stage, settings: settingsPayload() })
+      .then(()=>{ setSaveMsg('Updated “'+appliedProf.name+'”'); setShowSave(false); refreshProfiles(); })
+      .catch(e=>setSaveMsg(e.message||'update failed'));
+  };
+
+  const submit = () => { if(!allOk) return;
     onAssign(shelfN, { active:true, species:sp.species, tag:sp.tag,
       species2: sp2?sp2.species:'', tag2: sp2?sp2.tag:'',
-      moisture:Math.round((lo+hi)/2), lo, hi, durMin,
+      moisture:Math.round((lo+hi)/2), lo, hi, durMin, drainMin,
+      ecLo, ecHi, tempLo, tempHi, minIntervalMin:coolMin, maxCycles,
+      speciesId: sp.id, profileId: appliedProf?appliedProf.id:0, profileName: appliedProf?appliedProf.name:'', stage,
       light:true, on:fmtH(onH), off:fmtH(offH),
       lastWater:'—', usage:'—', status:'Healthy', stripe:sp.stripe });
   };
   return (
-    <div className="fx-back" onClick={onClose}><div className="fx-modal" style={{maxWidth:'660px'}} onClick={e=>e.stopPropagation()}>
+    <div className="fx-back" onClick={onClose}><div className="fx-modal" style={{maxWidth:'640px'}} onClick={e=>e.stopPropagation()}>
       <div className="fx-head"><span className="ttl">{editing?'Edit Shelf':'Assign Specimen'}</span><span className="tag">Shelf {shelfN}</span><span className="x" onClick={onClose}>&times;</span></div>
       <div className="fx-body">
+
+        {/* ── SPECIMEN & PROFILE ─────────────────────────────── */}
+        <div className="asg-sec first">Specimen &amp; Profile</div>
         <div className="fx-2">
           <div className="fx-field">
             <div className="fx-k">Specimen · native catalog</div>
@@ -103,27 +214,94 @@ function AssignModal({ shelfN, onAssign, onClose, initial }){
           </div>
         </div>
         <div className="fx-2">
-          <div className="fx-field">
-            <div className="fx-k">Target moisture band · %RH</div>
-            <div className="fx-band"><Stepper v={lo} set={setLo} min={20} max={94} unit="%"/><span className="asg-dash">to</span><Stepper v={hi} set={setHi} min={21} max={95} unit="%"/></div>
-            {!bandOk && <div className="fx-warn">Low must be below high</div>}
+          <div className="fx-field" style={{marginBottom: profiles?18:0}}>
+            <div className="fx-k">Propagation stage</div>
+            <select className="fx-select" value={customStage ? '__custom' : stage} onChange={e=>onPickStage(e.target.value)}>
+              <option value="">— none —</option>
+              {STAGE_PRESETS.map(s=><option key={s} value={s}>{s}</option>)}
+              <option value="__custom">Custom…</option>
+            </select>
+            {customStage && <input className="asg-input" style={{marginTop:8}} placeholder="Stage name (e.g. Air-layers)" value={stage} onChange={e=>setStage(e.target.value)}/>}
           </div>
-          <div className="fx-field">
-            <div className="fx-k">Watering duration · soak time</div>
-            <Stepper v={durMin} set={setDurMin} min={1} max={30} unit="min"/>
+          {profiles && (
+            <div className="fx-field" style={{marginBottom:0}}>
+              <div className="fx-k">Profile · saved for {sp.species}</div>
+              <select className="fx-select" value={profId} onChange={e=>onPickProfile(+e.target.value)}>
+                <option value={0}>Custom — settings below</option>
+                {profList.map(p=><option key={p.id} value={p.id}>{(p.stage?p.stage+' · ':'')+p.name}</option>)}
+              </select>
+              <div className="fx-latin">{profList.length ? 'Applying a profile fills the settings below.' : 'No saved profiles yet — dial in settings and save one.'}</div>
+            </div>
+          )}
+        </div>
+        {/* change 3: save-as-profile lives right here, always visible */}
+        {profiles && (
+          !showSave
+            ? <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginTop:12}}>
+                <button className="fx-btn" onClick={()=>{ setSaveMsg(''); setProfName(appliedProf?appliedProf.name:`${sp.species}${stage?' · '+stage:''}`); setShowSave(true); }}>Save these settings as a profile ›</button>
+                {saveMsg && <span className="fx-latin">{saveMsg}</span>}
+              </div>
+            : <div className="asg-savebar">
+                <span className="lbl">Save {stage?stage+' · ':''}as</span>
+                <input className="asg-input" value={profName} onChange={e=>setProfName(e.target.value)} placeholder="Profile name"/>
+                <button className="fx-btn primary" onClick={doSaveNew}>Save new</button>
+                {appliedProf && <button className="fx-btn" onClick={doUpdate}>Update “{appliedProf.name}”</button>}
+                <button className="fx-btn" onClick={()=>setShowSave(false)}>Cancel</button>
+                {saveMsg && <span className="fx-warn" style={{width:'100%'}}>{saveMsg}</span>}
+              </div>
+        )}
+
+        {/* ── WATERING ───────────────────────────────────────── */}
+        <div className="asg-sec">Watering</div>
+        <div className="asg-grid3">
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Moisture band · %VWC</div>
+            <RangeField lo={lo} hi={hi} setLo={setLo} setHi={setHi} min={20} max={95} unit="%VWC" ok={bandOk}/>
+          </div>
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Soak</div>
+            <NumField v={durMin} set={setDurMin} min={1} max={30} unit="min"/>
+          </div>
+          <div className="fx-field" style={{marginBottom:0}}>
+            {/* live-edit (ebb-flow): drain-back — valve holds open, pump off */}
+            <div className="fx-k">Drain-back</div>
+            <NumField v={drainMin} set={setDrainMin} min={0} max={30} unit="min"/>
           </div>
         </div>
-        <div className="fx-field">
-          <div className="fx-k">Photoperiod · rack-wide lighting</div>
-          <div style={{display:'flex',alignItems:'flex-end',gap:'22px',marginBottom:'12px'}}>
-            <div><div className="fx-k" style={{marginBottom:'5px'}}>Lights on at</div><Stepper v={onH} set={setOnH} min={0} max={23} unit=":00"/></div>
-            <div><div className="fx-k" style={{marginBottom:'5px'}}>Hours of light</div><Stepper v={lightHrs} set={setLightHrs} min={1} max={23} unit="h"/></div>
-            <div style={{marginLeft:'auto',fontFamily:'Zilla Slab',fontWeight:900,fontSize:'22px'}}>{fmtH(onH)}–{fmtH(offH)}<span style={{fontSize:'12px',color:'var(--char)'}}> on–off</span></div>
+        <div className="asg-hint" style={{marginTop:12}}>Pump rests above the high mark, triggers below the low. Drain-back holds the valve open after the pump stops so the tray drains back.</div>
+
+        {/* ── MONITORING TARGETS ─────────────────────────────── */}
+        <div className="asg-sec">Monitoring targets · happy band</div>
+        <div className="fx-2">
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Substrate EC</div>
+            <RangeField lo={ecLo} hi={ecHi} setLo={setEcLo} setHi={setEcHi} min={0} max={3000} step={50} unit="µS/cm" ok={ecOk}/>
           </div>
-          <PhotoRail onH={onH} hours={lightHrs}/>
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Root zone temperature</div>
+            <RangeField lo={tempLo} hi={tempHi} setLo={setTempLo} setHi={setTempHi} min={40} max={100} unit="°F" ok={tempOk}/>
+          </div>
         </div>
+        <div className="asg-hint" style={{marginTop:12}}>The unit monitors substrate EC &amp; root zone temperature but doesn’t control them — these bands drive the gauges and the time-in-target tracking.</div>
+
+        {/* ── LIGHTING ───────────────────────────────────────── */}
+        <div className="asg-sec">Lighting · rack-wide photoperiod</div>
+        <div style={{display:'flex',alignItems:'flex-end',gap:'26px',marginBottom:'14px'}}>
+          <div><div className="fx-k" style={{marginBottom:'6px'}}>Lights on at</div><NumField v={onH} set={setOnH} min={0} max={23} unit=":00"/></div>
+          <div><div className="fx-k" style={{marginBottom:'6px'}}>Hours of light</div><NumField v={lightHrs} set={setLightHrs} min={1} max={23} unit="h"/></div>
+          <div style={{marginLeft:'auto',fontFamily:'Zilla Slab',fontWeight:900,fontSize:'22px'}}>{fmtH(onH)}–{fmtH(offH)}<span style={{fontSize:'12px',color:'var(--char)'}}> on–off</span></div>
+        </div>
+        <PhotoRail onH={onH} hours={lightHrs}/>
       </div>
-      <div className="fx-foot"><span className="note">{editing?'Changes apply immediately and are logged.':'Brings Shelf '+shelfN+' online and starts the log.'}</span><button className="fx-btn" onClick={onClose}>Cancel</button><button className="fx-btn primary" onClick={submit} disabled={!bandOk}>{editing?'Save Changes':'Assign & Activate'}</button></div>
+      <div className="fx-foot">
+        {/* change 2: clearing the bay auto-disables sensors + valve; disable
+            pauses without clearing the specimen. Both are logged. */}
+        {editing && onClear && <button className="fx-btn danger" onClick={()=>onClear(shelfN)}>Clear Bay</button>}
+        {editing && onDisable && <button className="fx-btn" onClick={()=>onDisable(shelfN)}>Disable Shelf</button>}
+        <span className="note"></span>
+        <button className="fx-btn" onClick={onClose}>Cancel</button>
+        <button className="fx-btn primary" onClick={submit} disabled={!allOk}>{editing?'Save Changes':'Assign & Activate'}</button>
+      </div>
     </div></div>
   );
 }
@@ -174,6 +352,20 @@ function LockScreen({ clock, onUnlock }){
 /* ============ FLOW 3 · OFFLINE ============ */
 function OfflineBanner({ lastSync='14:32' }){
   return (<div className="ban web"><span className="d"></span>Controller unreachable — showing last-known readings from {lastSync} · retrying…</div>);
+}
+
+/* ============ change 2 · MAINTENANCE MODE ============ */
+// System-wide banner: irrigation automation is suspended (lighting still runs;
+// manual watering asks for confirmation). Stewards/growers get a resume button.
+function MaintenanceBanner({ onExit, canManage }){
+  return (
+    <div className="ban web" style={{background:'var(--ochre-deep)'}}>
+      <span className="d"></span>
+      Maintenance mode · irrigation automation suspended — lighting still runs, manual watering asks first
+      {canManage && onExit &&
+        <button className="fx-btn" style={{marginLeft:'auto',padding:'5px 12px'}} onClick={onExit}>Resume automation</button>}
+    </div>
+  );
 }
 
 /* ============ FLOW 4 · ALERTS + ESCALATION ============ */
@@ -265,4 +457,4 @@ function Confirm({ title, body, confirmLabel, danger, onConfirm, onCancel }){
   );
 }
 
-export { Stepper, PinPad, PhotoRail, AssignModal, SignInModal, LockScreen, OfflineBanner, AlertBar, AlertsModal, HistoryModal, Confirm };
+export { Stepper, PinPad, PhotoRail, AssignModal, SignInModal, LockScreen, OfflineBanner, MaintenanceBanner, AlertBar, AlertsModal, HistoryModal, Confirm };

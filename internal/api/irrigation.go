@@ -79,6 +79,16 @@ type zonePatch struct {
 	SpeciesLatin      *string  `json:"species_latin"`
 	Species2          *string  `json:"species2"`
 	Species2Latin     *string  `json:"species2_latin"`
+	// change 3 (species profiles): monitoring-only EC/temp target ranges +
+	// applied-profile linkage. A range field set to 0 clears that bound.
+	ECMin       *float64 `json:"ec_min"`
+	ECMax       *float64 `json:"ec_max"`
+	TempMinF    *float64 `json:"temp_min_f"`
+	TempMaxF    *float64 `json:"temp_max_f"`
+	SpeciesID   *string  `json:"species_id"`
+	ProfileID   *int64   `json:"profile_id"`
+	ProfileName *string  `json:"profile_name"`
+	Stage       *string  `json:"stage"`
 }
 
 func (s *Server) handlePatchZone(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +163,35 @@ func (s *Server) handlePatchZone(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Species2Latin != nil {
 		cfg.Species2Latin = *p.Species2Latin
+	}
+	// change 3: EC/temp target ranges (monitoring only). A 0 (or negative)
+	// bound clears it, so a range can be removed as well as set.
+	clearable := func(dst **float64, v *float64) {
+		if v == nil {
+			return
+		}
+		if *v <= 0 {
+			*dst = nil
+		} else {
+			nv := *v
+			*dst = &nv
+		}
+	}
+	clearable(&cfg.ECMin, p.ECMin)
+	clearable(&cfg.ECMax, p.ECMax)
+	clearable(&cfg.TempMinF, p.TempMinF)
+	clearable(&cfg.TempMaxF, p.TempMaxF)
+	if p.SpeciesID != nil {
+		cfg.SpeciesID = *p.SpeciesID
+	}
+	if p.ProfileID != nil {
+		cfg.ProfileID = *p.ProfileID
+	}
+	if p.ProfileName != nil {
+		cfg.ProfileName = *p.ProfileName
+	}
+	if p.Stage != nil {
+		cfg.Stage = *p.Stage
 	}
 	body, _ := json.Marshal(cfg)
 	zone.ConfigJSON = string(body)

@@ -38,6 +38,7 @@ type Server struct {
 	settingsRepo *storage.SettingsRepo
 	zones        *storage.ZoneRepo
 	cycles       *storage.CycleRepo
+	profiles     *storage.SpeciesProfileRepo
 	eventLog     *logging.EventLogger
 	db           *sql.DB
 	log          zerolog.Logger
@@ -88,7 +89,10 @@ func NewRouter(d Deps) http.Handler {
 		settingsRepo: d.Settings,
 		zones:        d.Zones,
 		cycles:       d.Cycles,
-		eventLog:     d.EventLog,
+		// change 3: species profiles repo derives from the shared DB handle —
+		// no new Deps wiring needed at the cmd layer.
+		profiles: storage.NewSpeciesProfileRepo(d.DB),
+		eventLog: d.EventLog,
 		db:           d.DB,
 		log:          d.Log,
 		startedAt:    time.Now(),
@@ -153,6 +157,12 @@ func NewRouter(d Deps) http.Handler {
 		r.Put("/lighting/schedule", s.handlePutLightingSchedule)
 
 		r.Get("/species", s.handleListSpecies)
+		// change 3: species profiles CRUD (per-species, per-stage saved settings)
+		r.Get("/species-profiles", s.handleListSpeciesProfiles)
+		r.Post("/species-profiles", s.handleCreateSpeciesProfile)
+		r.Get("/species-profiles/{id}", s.handleGetSpeciesProfile)
+		r.Put("/species-profiles/{id}", s.handlePutSpeciesProfile)
+		r.Delete("/species-profiles/{id}", s.handleDeleteSpeciesProfile)
 
 		r.Get("/safety/status", s.handleSafetyStatus)
 		r.Post("/safety/emergency-stop", s.handleEmergencyStop)
