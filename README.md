@@ -160,11 +160,16 @@ accepted from the unit's own network), and the rack is yours.
 | [`docs/deployment.md`](docs/deployment.md) | Debian 13 on the Piconium, kiosk, serial stability, eMMC & NVMe |
 | [`docs/remote-access.md`](docs/remote-access.md) | Serving `unit01.shortsfieldstation.org` — tunnel, TLS, the trust model |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | The complete working record: decisions, sharp edges, bench checklist |
+| [`docs/SENSORS.md`](docs/SENSORS.md) | The soil probe, reverse-engineered: verified register map, wiring, multi-probe addressing |
+| [`docs/BRINGUP.md`](docs/BRINGUP.md) | Hardware install playbook for the on-device session — sequence, gates, gotchas |
 
 ## Station Log
 
-Software: **feature-complete and verified in simulation.** Awaiting the
-bench: hardware bring-up, sensor commissioning, register-map verification,
+Software: **feature-complete and verified in simulation.** The soil probe's
+register map is verified against the physical sensor (no pH channel — the
+station measures substrate EC, and the moisture channel passed the salt-water
+dielectric test). Awaiting the bench: hardware bring-up per
+[`docs/BRINGUP.md`](docs/BRINGUP.md), sensor commissioning,
 hardware-in-the-loop safety trials, pump flow calibration, and the tunnel to
 the field station's domain.
 

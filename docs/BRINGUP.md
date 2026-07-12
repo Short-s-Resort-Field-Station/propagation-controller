@@ -1,0 +1,98 @@
+# BRINGUP — hardware install playbook (for the on-device session)
+
+**Audience:** the Claude session running *on the Piconium itself* (or over SSH
+to it) doing first hardware bring-up, with Austin at the bench. Written
+2026-07-11 by the session that reverse-engineered the soil probe and shipped
+the EC metric. Read `docs/HANDOFF.md` for project context, `docs/SENSORS.md`
+for verified probe facts, `docs/deployment.md` for the OS steps this document
+sequences.
+
+## Mission
+
+Take the repo from "verified in simulation" to "running the physical rack":
+propagationd + watchdog as services, real relay + Modbus drivers, kiosk
+touchscreen, and every safety layer demonstrated against real hardware.
+
+## Ground rules (Austin's working style — non-negotiable)
+
+- **Verify every claim live.** Exercise it over HTTP, read the actual logs,
+  screenshot the UI. Never report a step done without evidence.
+- **Raise a concern once, then defer** if Austin reaffirms.
+- **Ask hardware questions before assuming** — he answers fast and precisely.
+- Safety engineering is the product. If a safety layer misbehaves, stop and
+  fix it before moving on; never bypass one to make progress.
+
+## Hardware facts you'd otherwise rediscover the hard way
+
+1. **Soil probe talks 4800 baud, 8N1, slave address 1.** The daemon default
+   (`-modbus-baud`) is already 4800. If the probe seems absent, suspect
+   wiring before software: probe yellow → adapter A/Data+, probe blue →
+   B/Data−, and the probe MUST have V+ (brown) powered — an unpowered or
+   A/B-swapped probe is perfectly silent. Full map + bench behaviour:
+   `docs/SENSORS.md`.
+2. **The probe has no pH channel.** The product intentionally shows
+   Substrate EC (µS/cm). Don't "fix" anything back to pH.
+3. **EC readings of exactly 20000 are clipped** (sensor ceiling) and arrive
+   with quality `clipped` — that value means "off-scale", not a measurement.
+4. **Additional probes (shelves 02–04) all ship at address 1.** Readdress
+   each alone on the bus with `bin/probe-address -to <N> -yes` BEFORE
+   connecting it alongside the others (`docs/SENSORS.md` §multi-probe).
+5. **Numato relay** enumerates as CDC ACM at `/dev/serial/by-id/*Numato*`;
+   the FTDI RS485 adapter autodetects via `/dev/serial/by-id/*FTDI*`. Pin
+   both explicitly in the unit file env once known — by-id paths are stable,
+   ttyUSB numbering is not.
+6. **Kit 003 (Atom E3845 / Bay Trail) needs `intel_idle.max_cstate=1`** on
+   the kernel cmdline or the board freezes under load. Kit 002 (N3710)
+   needs nothing.
+7. The service binds **:80 via CAP_NET_BIND_SERVICE** (no root, no reverse
+   proxy). Kiosk is cage + chromium at `http://localhost/ui/touch`.
+
+## Sequence
+
+Follow `docs/deployment.md` for each step's detail; this is the order and
+the verification gate for each.
+
+1. **OS + users + udev** (deployment.md §§1–3). Gate: both serial by-id
+   paths visible, `propagation` user in `dialout`.
+2. **Binaries**: `make linux` on the build machine → scp `propagationd`,
+   `propagation-watchdog`, `probe-address` + `deploy/` → `install.sh`.
+   Gate: `systemctl status` green for both services in **simulation** first.
+3. **Probe smoke test, before real mode**: with the daemon stopped, run the
+   readdressing tool as a dry run — `bin/probe-address -to 2` (no `-yes`)
+   reports the probe it found (moisture, temp, EC) without writing
+   anything. That one line proves port, baud, wiring, and address in
+   isolation from the daemon.
+4. **Real mode**: drop `-simulation`. Gate: `/api/v1/sensors` shows
+   `soil_zone_1_*` and `reservoir_level_level` with quality `good`, values
+   plausible (probe in air: moisture ≈ 0, EC 0, temp ≈ room).
+5. **Relay bring-up with the pump DRY-DISCONNECTED** (deployment.md order):
+   exercise each channel from the Controls screen, listen for the clicks,
+   then wire loads one at a time.
+6. **Calibration** (deployment.md §sensors): reservoir level against a
+   ruler; soil probe against pots of the actual substrate. Update device
+   config JSON — no rebuild needed.
+7. **Safety demonstration** (the finish line, from HANDOFF §8): pull the
+   reservoir sensor mid-cycle, yank the probe, kill propagationd and watch
+   the watchdog seize the relay port and force safe state. Each must be
+   observed on real hardware, not assumed from the sim.
+8. **Kiosk + remote access** (deployment.md §touchscreen,
+   `docs/remote-access.md` for the Cloudflare tunnel).
+
+## Known state of the codebase at handoff
+
+- All 12 Go test packages green; both UIs screenshot-verified 2026-07-11.
+- Austin's dev database (not shipped) was migrated pH→EC; a fresh install
+  seeds EC correctly from scratch — no migration concerns on the device.
+- `web/` needs Node only at build time; the Piconium gets static binaries.
+- Watchdog restart-ladder and port-seize were tested in simulation with a
+  real port seize on the bench Mac; the on-device demonstration (step 7) is
+  the remaining proof.
+
+## If the probe misbehaves on the rack
+
+Bench-verified diagnostics, fastest first: (a) `probe-address` dry run —
+proves the whole serial path in one command; (b) swap A/B at the terminal
+block; (c) check V+ — these probes brown-out silently below ~4.5 V; (d) probe
+answers but readings frozen? poll interval vs. another master — never run two
+readers on one bus. The raw register dump procedure and full map are in
+`docs/SENSORS.md` if genuinely stuck.
