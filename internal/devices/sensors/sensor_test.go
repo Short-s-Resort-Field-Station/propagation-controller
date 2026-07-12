@@ -79,6 +79,27 @@ func TestReadAllAppliesScaleOffsetAndKeys(t *testing.T) {
 	}
 }
 
+func TestReadAllMarksClippedReadings(t *testing.T) {
+	bus := modbus.NewMockBus()
+	bus.Open(context.Background())
+
+	clip := 800.0 // below the mock EC range (900..1450) so every read clips
+	cfg := Config{
+		ModbusAddress:       1,
+		PollIntervalSeconds: 10,
+		Registers: []RegisterSpec{
+			{Name: "ec", Register: 2, DataType: "uint16", Scale: 1, Unit: "µS/cm", ClipAt: &clip},
+		},
+	}
+	readings, err := ReadAll(context.Background(), bus, "soil_zone_1", cfg)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if readings[0].Quality != "clipped" {
+		t.Errorf("value %v at/above clip %v: quality = %q, want clipped", readings[0].Value, clip, readings[0].Quality)
+	}
+}
+
 func TestReadAllUnknownSlaveFails(t *testing.T) {
 	bus := modbus.NewMockBus()
 	bus.Open(context.Background())

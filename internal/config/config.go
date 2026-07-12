@@ -28,7 +28,9 @@ func Load() Config {
 	flag.BoolVar(&c.Simulation, "simulation", envBool("PROPAGATION_SIMULATION"), "run with simulated hardware drivers")
 	flag.StringVar(&c.RelayPort, "relay-port", envOr("PROPAGATION_RELAY_PORT", ""), "serial port of the Numato relay controller (autodetected if empty)")
 	flag.StringVar(&c.ModbusPort, "modbus-port", envOr("PROPAGATION_MODBUS_PORT", ""), "serial port of the RS485 adapter (autodetected if empty)")
-	flag.IntVar(&c.ModbusBaud, "modbus-baud", envIntOr("PROPAGATION_MODBUS_BAUD", 9600), "Modbus RTU baud rate")
+	// The ZTS-3000 soil probes ship at 4800 baud (verified against the real
+	// sensor 2026-07-10) — a 9600 default would show them as silently offline.
+	flag.IntVar(&c.ModbusBaud, "modbus-baud", envIntOr("PROPAGATION_MODBUS_BAUD", 4800), "Modbus RTU baud rate")
 	flag.StringVar(&c.LogLevel, "log-level", envOr("PROPAGATION_LOG_LEVEL", "info"), "log level: debug|info|warn|error")
 	flag.BoolVar(&c.LogPretty, "log-pretty", envBool("PROPAGATION_LOG_PRETTY"), "human-readable console logs instead of JSON")
 	flag.Parse()

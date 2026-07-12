@@ -23,6 +23,10 @@ type RegisterSpec struct {
 	Offset       float64 `json:"offset,omitempty"`
 	Unit         string  `json:"unit"`
 	SensorKey    string  `json:"sensor_key,omitempty"` // default <device_key>_<name>
+	// ClipAt marks readings at/above this scaled value as quality "clipped" —
+	// the sensor is pinned at its range ceiling and the true value is higher
+	// (e.g. the ZTS-3000 EC channel tops out at exactly 20000 µS/cm).
+	ClipAt *float64 `json:"clip_at,omitempty"`
 }
 
 // Config is the device config_json payload for a generic_modbus sensor.
@@ -90,12 +94,17 @@ func ReadAll(ctx context.Context, bus modbus.Bus, deviceKey string, cfg Config) 
 		if key == "" {
 			key = deviceKey + "_" + reg.Name
 		}
+		value := raw*scale + reg.Offset
+		quality := "good"
+		if reg.ClipAt != nil && value >= *reg.ClipAt {
+			quality = "clipped"
+		}
 		readings = append(readings, Reading{
 			SensorKey: key,
 			Name:      reg.Name,
-			Value:     raw*scale + reg.Offset,
+			Value:     value,
 			Unit:      reg.Unit,
-			Quality:   "good",
+			Quality:   quality,
 			ReadAt:    time.Now().UTC(),
 		})
 	}

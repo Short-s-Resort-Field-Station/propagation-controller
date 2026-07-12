@@ -82,8 +82,9 @@ func (s *Service) EnsureDefaults() error {
 			{Name: "moisture", Register: 0, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "%"},
 			{Name: "temperature", Register: 1, FunctionCode: 3, DataType: "int16", Scale: 0.1, Unit: "°C"},
 			// ZTS-3000 probe: EC in µS/cm at register 2, no scaling (verified
-			// against the real sensor 2026-07-10; it has no pH channel).
-			{Name: "ec", Register: 2, FunctionCode: 3, DataType: "uint16", Scale: 1, Unit: "µS/cm"},
+			// against the real sensor 2026-07-10; it has no pH channel). The
+			// channel pins at 20000 — readings there are clipped, not real.
+			{Name: "ec", Register: 2, FunctionCode: 3, DataType: "uint16", Scale: 1, Unit: "µS/cm", ClipAt: f64(20000)},
 		},
 	}
 	reservoir := Config{
@@ -389,3 +390,5 @@ func (s *Service) BusHealth(ctx context.Context) modbus.Health {
 func (s *Service) ScanBus(ctx context.Context, start, end uint8) ([]uint8, error) {
 	return s.bus.Scan(ctx, start, end)
 }
+
+func f64(v float64) *float64 { return &v }
