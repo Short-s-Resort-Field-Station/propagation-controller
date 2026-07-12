@@ -4,6 +4,7 @@ After=propagationd.service seatd.service systemd-user-sessions.service
 Wants=propagationd.service
 
 [Service]
+Environment=WLR_RENDERER=pixman
 Environment=WLR_DRM_NO_ATOMIC=1
 User=kiosk
 Group=kiosk

@@ -87,30 +87,29 @@ the software level:
   kiosk) come up automatically and chromium loads `/ui/touch` — confirmed via
   its remote-debug endpoint. The web app itself is fine.
 
-**OPEN ITEM — on-screen output not yet visually confirmed.** Both `grim` and
-chromium's own `Page.captureScreenshot` block with no frame, and cage's debug
-run gives the root cause:
+**RESOLVED 2026-07-12** — the touch UI now renders full-screen on the
+Waveshare panel and survives reboot. It took three fixes, all committed:
 
-```
-[ERROR] backend/drm/util.c: Failed to parse EDID
-[ERROR] connector HDMI-A-2: drmModeMoveCursor failed: Invalid argument
-```
+1. **Wrong output + wrong resolution.** The board exposes two HDMI connectors
+   (HDMI-A-1, HDMI-A-2) for its one physical port. An earlier debug step had
+   force-enabled BOTH at 1024×768 (`video=HDMI-A-*:1024x768@60e`), so cage
+   rendered to the phantom connector while the panel sat on the other, and at
+   the wrong resolution. **Removed those forced modes** — with the Waveshare
+   connected, HDMI-A-2 now reports `connected 800x480` from its own EDID and
+   HDMI-A-1 is correctly disconnected. (Keep only `video=eDP-1:d`.)
+2. **No frame presented.** wlroots/cage on this Braswell GPU wouldn't scan out
+   the client buffers (grim and chromium's captureScreenshot both blocked;
+   only the hardware cursor plane showed). Fix: **`Environment=WLR_RENDERER=pixman`**
+   in the service (software compositing — plenty fast for a static kiosk).
+   `WLR_DRM_NO_ATOMIC=1` is also set and harmless.
+3. **gnome-keyring prompt on top.** Leftover from the accidental GNOME install:
+   chromium triggered a "create a new keyring" dialog that covered the UI.
+   Fix: **`--password-store=basic`** on chromium + `apt purge gnome-keyring`.
 
-The **bench monitor's EDID does not parse**, so wlroots/cage can't negotiate a
-video mode and never presents a frame — the screen stays dark even though
-chromium is rendering. This is the likely root cause of the *entire* night's
-display saga (installer black-screens included). It is a display-negotiation
-problem, not a software-config one.
-
-**Next session, with eyes on the panel:** connect the **actual Waveshare 5″
-800×480 touchscreen** (the real target — its EDID may parse cleanly where the
-bench monitor's doesn't) and look. If it's still dark, the fix is to supply a
-forced EDID to the kernel: build a 800×480 (or 1024×768) EDID blob and boot
-with `drm.edid_firmware=HDMI-A-1:edid/<blob>.bin` plus the existing
-`video=HDMI-A-1:...e` force-enable. Do NOT chase this further on the bench
-monitor — verify against the panel that ships with the unit. Console text
-(fbcon) DOES paint at 1024×768, so the hardware path works; only the
-EDID-dependent Wayland modeset is failing.
+The bench monitor's EDID genuinely doesn't parse (that was the earlier dead
+screen); the Waveshare's does. If a future panel is ever dark again, the
+fallback is a forced EDID blob via `drm.edid_firmware=HDMI-A-2:edid/<blob>.bin`.
+Working config is in `deploy/kiosk/`.
 
 ## Sequence
 

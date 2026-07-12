@@ -1,7 +1,7 @@
 #!/bin/sh
 # cage launches one app fullscreen; chromium in kiosk mode pointed at the touch UI.
 exec chromium \
-  --kiosk  \
+  --kiosk --password-store=basic  \
   --ozone-platform=wayland \
   --enable-features=UseOzonePlatform \
   --no-first-run \
