@@ -14,7 +14,6 @@ FIELD STATION INSTRUMENTATION
 
 
 *Texas Hill Country · Edwards Plateau · Lampasas River*
-31°07′21.0″N · 98°02′52.9″W
 
 </div>
 
@@ -177,5 +176,5 @@ the field station's domain.
 
 <div align="center">
 <sub>SHORT'S RESORT FIELD STATION · GROWTH & RENEWAL · FY·10<br>
-CONFIDENTIAL · WORKING EQUIPMENT · KEEP WATER OFF THE FLOOR</sub>
+WORKING EQUIPMENT · KEEP WATER OFF THE FLOOR</sub>
 </div>
