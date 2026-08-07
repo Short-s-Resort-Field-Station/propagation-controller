@@ -44,7 +44,7 @@ means closed valves and a resting pump, never a flooded floor.
 **The rack face** (`/ui/touch`) is the panel mounted on the unit itself: an
 engraved apparatus of needle dials and status lamps on dark glass, with a
 limestone day-mode for bright mornings. Tap a shelf plate for its detail —
-moisture, temperature, soil pH — and *Water Now* runs a real, bounded,
+moisture, temperature, substrate EC — and *Water Now* runs a real, bounded,
 safety-checked pump cycle. No sign-in at the rack: standing in front of the
 machine is credential enough.
 
@@ -107,7 +107,7 @@ not open.
 | 6 | **12 V USB desk fans** (plugs stripped) | Air across the canopy | Relay 7 | Single speed, ganged as one circuit, one honest toggle. |
 | 7 | **Waveshare 5″ touchscreen** (800×480) | The rack face | HDMI + USB HID | No drivers. UI drawn on an 880×528 canvas, scaled exactly. |
 | 8 | **Xiusiyt RS485-WE-1800-BT cable** | The sensor party line | USB · `/dev/ttyUSB*` | Genuine FT232RQ + SP485EN, auto TX-direction, Tx/Rx lamps. Jumper Term1↔Term2 for 120 Ω termination. |
-| 9 | **RS485 soil probes** (moisture · temp · pH) | Per-shelf ground truth | Modbus RTU, 9600 8N1 | IP68, 12 V. Ship at address 1 — commission **one at a time** and re-address. Register maps verified at the bench. |
+| 9 | **RS485 soil probes** (moisture · temp · EC) | Per-shelf ground truth | Modbus RTU, 4800 8N1 | ZTS-3000, IP68, 12 V. Ship at address 1 — commission **one at a time** and re-address. Register map verified at the bench (no pH channel). |
 | 10 | **Submersible level transmitter** (SS304) | Reservoir eyes | Modbus RTU | Hydrostatic; reports water column — calibrated empty/full to percent. |
 | 11 | **7-gallon jug** (26.5 L) | The reservoir | — | Days-remaining estimated until pump flow is calibrated. |
 | 12 | 12 V supply, common ground, flyback diodes | Housekeeping | — | Sensor power from the 12 V rail — *never* the RS485 cable's 5 V pin. One ground for rail and bus. |

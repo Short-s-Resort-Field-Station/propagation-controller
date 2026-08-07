@@ -1,6 +1,6 @@
 # Propagation Unit 01 — Hardware Inventory
 
-Updated 2026-07-05 with Austin's answers.
+Updated 2026-07-05 with Austin's answers. Soil-probe section updated 2026-07-10 after reverse-engineering the ZTS-3000 (moisture / temperature / EC, **no pH**) against the real hardware.
 
 ## Main Board — Piconium (Embedded Now), one of two kits
 
@@ -35,14 +35,14 @@ Notes:
 | Circulation fans | 12 V USB desk fans, USB plug stripped, single speed — **all ganged on relay 7** | Simple on/off toggle in the GUI (Austin: keep it simple). One relay for all fans preserves relay 6 for Shelf 4's valve and relay 8 as the last spare. The design handoff's per-shelf 0–10 fan stepper is superseded by this decision. |
 | Pump | SEAFLO diaphragm — relay 2 | **12 VDC.** ⚠ Check current draw: SEAFLO diaphragm pumps commonly pull 4–8 A at 12 V; Numato contacts typically rated ~7 A @ 30 VDC. If near limit, drive a 12 V automotive relay from the Numato channel instead of switching the pump directly. |
 | Valves | 4× U.S. Solid JFSV00012 (USS2-00012) solenoid — relays 3–6 | 12 VDC, **normally closed** → fails closed on power loss (correct fail-safe: de-energized = no water). Coil draw well under 1 A, fine for the Numato contacts. Add flyback diodes across each coil (and pump). Verify whether the valve is direct-acting (works at 0 PSI) or pilot-operated (needs pressure differential) for any gravity-drain path. |
-| Soil sensors | Generic RS485 multi-parameter probe: moisture (±2%), temperature (±0.5 °C), humidity, **pH** — Modbus RTU, IP68, 9–24 V DC | pH comes free (spec listed it as future). Register map is vendor-specific: seeded defaults assume the common layout (holding regs, moisture@0 ×0.1, temp@1 ×0.1 signed, pH@3 ×0.1) — **verify against seller manual or probe at bring-up**; editable live via `PATCH /api/v1/sensors/{key}/config`. |
+| Soil sensors | **ZTS-3000-TR-ECWS-N01** (OEM Jinan Zhaotaisheng) — 3-prong moisture / temperature / **EC** probe, FDR-class dielectric, 4.5–30 V DC, IP68, Modbus RTU. **No pH and no humidity channel.** | **Reverse-engineered and verified 2026-07-10** against the real probe. Modbus **addr 1, 4800 baud 8N1**; function codes 0x03 and 0x04 return the same data. Registers: `0x0000` moisture ×10 %VWC · `0x0001` temperature ×10 °C (signed) · `0x0002` EC in µS/cm (0–20000 ceiling). Salt-water test confirmed a genuine dielectric response (EC 246→20000 moved moisture only 92.0→88.2%). Driver reads register 2 as substrate EC end-to-end — there is no pH anywhere in the stack. Still editable live via `PATCH /api/v1/sensors/{key}/config`. |
 | Reservoir sensor | Submersible hydrostatic level transmitter, SS304, IP68, RS485 output variant, 12–30 V DC, 0.2% accuracy | Reports level (water column); converting to tank % needs an empty/full calibration (register scale/offset or the config service later). Register map also vendor-specific — probe at bring-up. |
 
 ### RS485 bus wiring & bring-up notes
 
 - One twisted pair daisy-chained: adapter Data+ (orange) → all sensor A/+ lines; Data− (yellow) → all B/− lines. **Common ground** between the 12 V sensor supply and the adapter GND (black). Sensors are powered from the 12 V rail, *not* the adapter's 5 V pin.
-- ⚠ **Address collision:** generic RS485 sensors ship at Modbus address 1. With multiple sensors on one bus, connect them **one at a time** and re-address each (vendor-specific write register; often 0x07D0 or per manual) before adding the next. The diagnostics scan endpoint (`POST /api/v1/diagnostics/modbus/scan`) finds whatever is responding.
-- Defaults: 9600 baud, 8N1 (typical for these sensors; confirm per manual).
+- ⚠ **Address collision:** the ZTS-3000 probes ship at Modbus address 1. With multiple sensors on one bus, connect them **one at a time** and re-address each before adding the next — the address lives in holding register `0x07D0` (verified), and `cmd/probe-address` does the read-verify-write safely. The diagnostics scan endpoint (`POST /api/v1/diagnostics/modbus/scan`) finds whatever is responding.
+- Bus defaults: **4800 baud, 8N1** — the ZTS-3000 factory default (verified; the baud code lives in register `0x07D1`, where `1` = 4800). The whole bus runs one baud, so the reservoir level transmitter must match — set it to 4800 at bring-up if it doesn't already answer there.
 
 ## Numato 8-Channel USB Relay — Protocol Notes
 
@@ -69,7 +69,7 @@ Expansion to 6 shelves exceeds this board — plan a second Numato module (the r
 
 ## Remaining Open Questions
 
-1. Sensor register maps: seller manuals/datasheets for the soil probe and level transmitter would let us pre-fill exact configs; otherwise we probe at bring-up (scan + trial reads) — workable either way.
+1. ~~Soil probe register map~~ — **done.** ZTS-3000 reverse-engineered 2026-07-10 (map in the Peripherals table). The **reservoir level transmitter** register map and baud are still unconfirmed; probe at bring-up (scan + trial reads) and set it to 4800 baud to share the bus.
 2. SEAFLO pump model / current rating — to confirm direct relay switching is safe.
 3. Barina light wattage — mains-side contact rating check.
 4. Piconium: onboard Wi-Fi or USB adapter? Battery-backed RTC?
