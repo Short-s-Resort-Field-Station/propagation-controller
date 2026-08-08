@@ -216,16 +216,18 @@ Follow `docs/deployment.md` (OS) and `docs/remote-access.md` (domain). Order:
    driver autodetects; pin with `-relay-port` in the unit file env. Remember:
    wire span loads to **normally-open** contacts (de-energized = off); relays
    HOLD STATE if the host dies — that's why the watchdog exists.
-4. **RS485 chain**: FTDI adapter (`/dev/serial/by-id/usb-FTDI*`), 9600 8N1.
-   ⚠ All generic sensors ship at Modbus address 1 — connect ONE AT A TIME
-   and re-address (vendor register, often 0x07D0; probe with
+4. **RS485 chain**: FTDI adapter (`/dev/serial/by-id/usb-FTDI*`), 4800 8N1.
+   ⚠ ZTS-3000 probes ship at Modbus address 1 — connect ONE AT A TIME and
+   re-address (holding register 0x07D0, verified; `cmd/probe-address` does the
+   read-verify-write safely, or probe with
    `POST /api/v1/diagnostics/modbus/scan`). Jumper the adapter's Term1↔Term2
    for 120 Ω termination. Common ground between 12 V rail and RS485 GND.
-5. **Register maps**: the seeded configs (moisture@0 ×0.1, temp@1 int16 ×0.1,
-   pH@3 ×0.1; level@0 ×0.1) are guesses at the common generic layout. Probe
-   with force-poll + hot-reload (`PATCH /api/v1/sensors/{key}/config` — no
-   restart needed) until values look sane. Level sensor reports water column;
-   calibrate empty/full → % via scale/offset.
+5. **Register maps**: the soil probe (ZTS-3000) is verified as of 2026-07-10 —
+   moisture@0 ×0.1, temp@1 int16 ×0.1, **EC@2 in µS/cm** (no pH channel). The
+   reservoir level transmitter map is still a guess (level@0 ×0.1); probe with
+   force-poll + hot-reload (`PATCH /api/v1/sensors/{key}/config` — no restart
+   needed) until values look sane. Level sensor reports water column; calibrate
+   empty/full → % via scale/offset.
 6. **Kiosk**: cage + chromium at `http://localhost/ui/touch` (unit file
    in deploy/). The Waveshare 800×480 needs no drivers.
 7. **Hardware-in-the-loop safety tests**: run the spec §24.5 list — pump

@@ -567,11 +567,11 @@ Initial supported sensors:
 
 * Soil moisture
 * Soil temperature
+* Soil EC (substrate conductivity, µS/cm — ZTS-3000 register 0x0002)
 * Reservoir level
 
-Future sensor types:
+Future sensor types (would need added or different hardware — the current ZTS-3000 probe has no pH channel):
 
-* EC
 * Water temperature
 * Air temperature
 * Air humidity
@@ -1473,7 +1473,7 @@ Maintenance
 │ Modbus RTU                                                   │
 │ Status: Online                                               │
 │ Adapter: /dev/serial/by-id/usb-FTDI...                       │
-│ Baud: 9600                                                   │
+│ Baud: 4800                                                   │
 │ [Scan Bus] [Poll All Sensors]                                │
 │                                                              │
 │ Sensors                                                      │
