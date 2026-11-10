@@ -273,8 +273,8 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
 
 function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onStop, onShutdown, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
-  // Easter egg (Austin, 2026-11-10): press and hold the thin divider under the
-  // title for 3 s to get the power-down popup. Nothing visible, nothing to
+  // Easter egg (Austin, 2026-11-10): press and hold the title for 3 s to get
+  // the power-down popup. Nothing visible, nothing to
   // bump by accident. 'idle' | 'ask' | 'down'
   const [power, setPower] = React.useState('idle');
   const holdRef = React.useRef(null);
@@ -340,9 +340,10 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
       <div className="rk2-inner">
         <div className="rk2-mast">
           <div className="rk2-eye"><span className="st"></span>Dept. of Forestry · Field Station<span className="st"></span></div>
-          <div className="rk2-ttl">Propagation Unit · No. 01</div>
+          {/* Easter egg: hold the title 3 s for the power-down popup. */}
+          <div className="rk2-ttl rk2-hold" onPointerDown={holdStart} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} onContextMenu={e=>e.preventDefault()}>Propagation Unit · No. 01</div>
         </div>
-        <div className="rk2-div rk2-hold" onPointerDown={holdStart} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} onContextMenu={e=>e.preventDefault()}><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
+        <div className="rk2-div"><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
         <div className="rk2-sub">
           <span className="date">Day · <b>{day || '06 / 21 / 26'}</b></span>
           <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{statusText}</span>

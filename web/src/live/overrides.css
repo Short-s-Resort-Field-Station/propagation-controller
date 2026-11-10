@@ -190,7 +190,10 @@
 
 /* Hidden power-down (2026-11-10): the divider is the long-press target; the
    popup reuses the confirm-overlay look. */
-.rk2-hold { cursor: default; user-select: none; -webkit-user-select: none; touch-action: none; padding: 6px 0; margin: -6px 0; }
+.rk2-hold { cursor: default; touch-action: none; }
+/* Kiosk: nothing on the panel is selectable text, and a long press never
+   opens a callout or highlights (Austin, 2026-11-10). */
+.rk2-screen, .rk2-screen * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .rk2-power { position: absolute; inset: 0; background: #0b0f0dcc; display: flex; align-items: center; justify-content: center; z-index: 40; }
 
 /* Species names (Austin, 2026-11-10): common name, then the Latin name in
