@@ -24,7 +24,7 @@ subtracts one on the wire. Software constants live in
 | 0 | 1 | Solenoid valve 1 → Shelf 1 (top) | 12 VDC via F1 | **2026-11-09** 2 s pulse, clicked at top shelf |
 | 1 | 2 | Solenoid valve 2 → Shelf 2 (middle) | 12 VDC via F1 | **2026-11-09** 2 s pulse, clicked at middle shelf |
 | 2 | 3 | Solenoid valve 3 → Shelf 3 (bottom) | 12 VDC via F2 | **2026-11-09** 2 s pulse, clicked at bottom shelf |
-| 3 | 4 | Circulation fans, all ganged, 12→5 V buck in Box 2 | 12 VDC via F3 | **2026-11-09** relay held: Fan 2 runs; **Fan 1 cable faulty (flagged)**. **FIXED 2026-11-10 13:40**: Fan 2 ran with relay 3 OFF because the blue P4 wire was touching the hot (COM/+12 V) at the Numato relay-3 terminal block — a stray strand/bad landing, not the field box. Re-landed on NO; 10 s pulse through the daemon: fans on, fans off, all relays off. Fan negatives moved from the field-box ground bus to the buck's OUT−. |
+| 3 | 4 | Circulation fans, all ganged, 12→5 V buck in Box 2 | 12 VDC via F3 | **2026-11-09** relay held: Fan 2 runs; **Fan 1 cable faulty (flagged)**. **FIXED 2026-11-10 13:40**: Fan 2 ran with relay 3 OFF because the blue P4 wire was touching the hot (COM/+12 V) at the Numato relay-3 terminal block — a stray strand/bad landing, not the field box. Re-landed on NO; 10 s pulse through the daemon: fans on, fans off, all relays off. Fan negatives moved from the field-box ground bus to the buck's OUT−. Fan 1 found wired red/black reversed and fried; replace. |
 | 4 | 5 | Spare — reserved for a 4th valve (zone_4 seeded here, disabled) | — | — |
 | 5 | 6 | Spare | — | — |
 | 6 | 7 | Hydrofarm pump, 33 W, via tail H1 → gang box | **120 VAC** | **2026-11-10** Austin found NO and COM swapped at R6, rewired; 3 s pulse through the daemon (safety-authorized): pump ran and stopped with the relay. VERIFIED |
@@ -88,7 +88,7 @@ Scan/dump/monitor/write scripts: `mbscan.py`, `mbdump.py`, `mbmon.py`, `mbwrite.
 ## OPEN ITEMS (updated 2026-11-10 12:45 — see docs/AUDIT-2026-11-10.md §6 for what was fixed)
 
 1. ~~Fan 2 runs with the fan relay off~~ **FIXED 2026-11-10**: blue P4 was touching +12 V at the Numato relay-3 terminals. Lesson (twice now, pump R6 and fan R3): meter every Numato output terminal to ground with the relay off before loads go on.
-2. **Fan 1 cable faulty** — replace.
+2. **Fan 1 is dead** (2026-11-10): its red/black were reversed at the buck, so it sat reverse-biased on 5 V — driver fried; confirmed by swapping onto Fan 2's terminals. Replace with any 5 V USB fan, plug cut, red → buck OUT+, black → OUT−. Fan 2 verified good.
 3. ~~Level sensor forgets address/baud on power loss~~ **RESOLVED 2026-11-10** by leaving it at factory (1 @ 9600) and moving the bus + probes to it (11-13 @ 9600). No re-commissioning ever needed. Pending: one more unplug/replug of the transmitter as the final proof (it should come back and simply keep reporting).
 4. ~~Reservoir placeholders~~ **SET 2026-11-10**: reservoir is a 5-gallon bucket (`PG.TANK_L` 18.9 L), full depth 13 in (`ReservoirFullDepthMM` 330, live config scale 100/330). Lockout at 20 % = 2.6 in. Calibration note: transmitter read 16.4 cm at 6 in (15.2 cm) and 6.1 cm at ~3 in — zero/span against a ruler still worthwhile.
 5. (unchanged) **All automation disabled for testing**: automation.enabled=false, maintenance.active=true, lighting schedule enabled=false. Re-enable deliberately when configuring.
