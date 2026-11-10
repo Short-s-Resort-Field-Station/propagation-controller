@@ -111,3 +111,79 @@
   cursor: pointer;
 }
 .rk2-themebtn:active { color: var(--sink); border-color: var(--sink); }
+
+/* Bring-up (Austin, 2026-11-09): the rack has three shelves, not four. Size
+   the shelf grids by how many plates there actually are so they fill the
+   whole canvas width — one equal column per shelf. */
+.rk2-plates, .rk-shelves { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+.rk2-plates { gap: 18px; }
+/* Wider plates: the dial itself grows via its size prop in rack2.jsx Plate. */
+.rk2-plate .rd { font-size: 36px; }
+.rk2-plate .nm { font-size: 23px; }
+
+/* Drain button (2026-11-10): sits beside Water Now in the shelf detail. */
+.rk2-wrow { display: grid; grid-template-columns: 1fr auto; gap: 10px; width: 100%; }
+.rk2-wrow .rk2-wbtn { width: 100%; }
+.rk2-dbtn { color: var(--sdim); border-color: var(--sline); letter-spacing: 0.14em; padding: 17px 18px; }
+.rk2-dbtn:hover { background: #ffffff0f; }
+
+/* ============ AUDIT 2026-11-10 (items 3.1–3.12) ============ */
+
+/* 3.7: the detail screen keeps a few px of slack under the Drain button. */
+.rk2-dbtn { padding: 16px 18px; }
+.rk2-controls2 { margin-top: 12px; }
+
+/* 3.1: rejected-command toast — mono, ochre on the dark face, sits over the
+   status row and never pushes the plates down (absolute). */
+.rk2-toast {
+  position: absolute; left: 50%; top: 92px; transform: translateX(-50%);
+  z-index: 8; max-width: 640px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px; border-radius: 4px;
+  border: 1px solid var(--ochre-l); background: #1B1812F2; color: var(--ochre-l);
+  font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.12em;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 6px 18px #0008;
+}
+.rk2-toast .d { width: 8px; height: 8px; border-radius: 50%; background: var(--ochre-l); flex: none; }
+.rk2-toast.over { top: 80px; z-index: 40; border-color: var(--oxblood-l); color: var(--oxblood-l); }
+.rk2-toast.over .d { background: var(--oxblood-l); }
+.rk2-screen.light .rk2-toast { background: #F3EBD8F2; }
+
+/* 3.2/3.3: the busy row — phase readout beside a Stop button. */
+.rk2-wrow.busy { grid-template-columns: 1fr auto; }
+.rk2-wrow.busy .rk2-pump { height: auto; min-height: 54px; }
+.rk2-stop { color: var(--oxblood-l); border-color: var(--oxblood-l); }
+.rk2-stop:active { background: #ffffff14; }
+.rk2-wbtn:disabled, .rk2-plaque:disabled, .rk2-seg button:disabled { opacity: 0.45; cursor: default; }
+
+/* 3.6: offline plaque in the shelf detail. */
+.rk2-offline { color: var(--oxblood-l); border-color: var(--oxblood-l); }
+
+/* 3.11: the one status line may carry a lockout key or "· maintenance" —
+   it shrinks rather than squeezing the date/time cells into two lines. */
+.rk2-status { white-space: nowrap; }
+.rk2-sub .date, .rk2-sub .time { white-space: nowrap; }
+.rk2-status.long { font-size: 13px; letter-spacing: 0.12em; padding-left: 12px; padding-right: 12px; }
+
+/* 3.12: long specimen names (e.g. "Bald Cypress + Possumhaw Holly") clamp to
+   two lines instead of wrapping into the dial. */
+.rk2-plate .nm .clamp {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; line-height: 1.1; word-break: break-word;
+}
+.rk2-plate .nm.long { font-size: 19px; }
+
+/* 3.1: dashboard toast, under the top bar. */
+.db-toast {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0; padding: 9px 22px;
+  background: var(--ochre-deep); color: var(--bone);
+  border-bottom: 2px solid var(--ink);
+  font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; cursor: pointer;
+}
+.db-toast .d { width: 9px; height: 9px; border-radius: 50%; background: var(--bone); flex: none; }
+/* 3.3: e-stop control + banner. */
+.db-estop { border-color: var(--oxblood) !important; color: var(--oxblood) !important; font-weight: 700; }
+.db-estop.active { background: var(--oxblood) !important; color: var(--bone) !important; }

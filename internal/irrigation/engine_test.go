@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type fixture struct {
 	zones    *storage.ZoneRepo
 	cycles   *storage.CycleRepo
 	readings *storage.ReadingRepo
+	events   *storage.EventRepo
 	resID    int64
 	ctx      context.Context
 }
@@ -41,7 +43,8 @@ func newFixture(t *testing.T) *fixture {
 	deviceRepo := storage.NewDeviceRepo(db)
 	readings := storage.NewReadingRepo(db)
 	settings := storage.NewSettingsRepo(db)
-	eventLog := logging.NewEventLogger(zerolog.Nop(), storage.NewEventRepo(db))
+	eventRepo := storage.NewEventRepo(db)
+	eventLog := logging.NewEventLogger(zerolog.Nop(), eventRepo)
 
 	mgr := devices.NewManager(relay.NewMock(), "mock", storage.NewRelayActionRepo(db), deviceRepo, eventLog, true)
 	if err := mgr.Start(context.Background()); err != nil {
@@ -72,7 +75,7 @@ func newFixture(t *testing.T) *fixture {
 	// The ebb-and-flow default drain (5 min) would make every generic cycle
 	// test wait out the drain phase. Reset seeded zones to zero drain here;
 	// the drain phase itself is exercised by TestDrainPhaseHoldsValveOpen.
-	for _, zk := range []string{"zone_1", "zone_2", "zone_3", "zone_4"} {
+	for _, zk := range []string{"zone_1", "zone_2", "zone_3"} {
 		z, err := zones.GetByKey(zk)
 		if err != nil || z == nil {
 			continue
@@ -86,10 +89,12 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatalf("reset zone drain: %v", err)
 		}
 	}
+	// Same wiring as cmd/propagationd: e-stop aborts the engine (audit 2.6).
+	sup.OnEmergencyStop(func() { engine.StopAll("safety_supervisor") })
 	engine.Start(ctx)
 
 	f := &fixture{engine: engine, mgr: mgr, sup: sup, zones: zones, cycles: cycles,
-		readings: readings, resID: dev.ID, ctx: ctx}
+		readings: readings, events: eventRepo, resID: dev.ID, ctx: ctx}
 	f.insertLevel(t, 80)
 	return f
 }
@@ -123,6 +128,37 @@ func (f *fixture) waitCycleResult(t *testing.T, zoneKey, want string, timeout ti
 	}
 	t.Fatalf("zone %s: no cycle recorded", zoneKey)
 	return storage.Cycle{}
+}
+
+func (f *fixture) setDrain(t *testing.T, zoneKey string, drainSeconds int) {
+	t.Helper()
+	z, _ := f.zones.GetByKey(zoneKey)
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: drainSeconds})
+	z.ConfigJSON = string(cfg)
+	if err := f.zones.Update(*z); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+}
+
+func (f *fixture) waitState(t *testing.T, zoneKey, state string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if st := f.engine.Status(); st.Active != nil && st.Active.ZoneKey == zoneKey && st.Active.State == state {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("zone %s never reached state %q", zoneKey, state)
+}
+
+func (f *fixture) hasEvent(t *testing.T, eventType string) bool {
+	t.Helper()
+	list, err := f.events.List(storage.EventFilter{EventType: eventType, Limit: 10})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	return len(list) > 0
 }
 
 func (f *fixture) relayState(t *testing.T, ch int) relay.State {
@@ -169,15 +205,15 @@ func TestQueueNeverRunsTwoZonesAtOnce(t *testing.T) {
 		t.Errorf("zone_2 queue position = %d", pos)
 	}
 
-	// Watch valve channels 3 and 4 continuously until both cycles finish.
+	// Watch valve channels 1 and 2 continuously until both cycles finish.
 	done := make(chan struct{})
 	violations := 0
 	go func() {
 		defer close(done)
 		deadline := time.Now().Add(8 * time.Second)
 		for time.Now().Before(deadline) {
-			s3 := f.relayState(t, 3)
-			s4 := f.relayState(t, 4)
+			s3 := f.relayState(t, 1)
+			s4 := f.relayState(t, 2)
 			if s3 == relay.On && s4 == relay.On {
 				violations++
 			}
@@ -312,10 +348,10 @@ func TestDrainPhaseHoldsValveOpen(t *testing.T) {
 		t.Fatalf("enqueue zone_1: %v", err)
 	}
 
-	// Wait for the drain phase: pump OFF while zone_1's valve (ch 3) stays OPEN.
+	// Wait for the drain phase: pump OFF while zone_1's valve (ch 1) stays OPEN.
 	drainSeen := false
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		if f.relayState(t, devices.PumpChannel) == relay.Off && f.relayState(t, 3) == relay.On {
+		if f.relayState(t, devices.PumpChannel) == relay.Off && f.relayState(t, 1) == relay.On {
 			drainSeen = true
 			break
 		}
@@ -325,22 +361,241 @@ func TestDrainPhaseHoldsValveOpen(t *testing.T) {
 		t.Fatal("never observed drain phase (pump off, valve open)")
 	}
 
-	// Request zone_2 during zone_1's drain: its valve (ch 4) must stay closed
+	// Request zone_2 during zone_1's drain: its valve (ch 2) must stay closed
 	// and zone_1's valve must still be open — one shelf at a time, drain included.
 	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_2", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
 		t.Fatalf("enqueue zone_2: %v", err)
 	}
-	if f.relayState(t, 4) != relay.Off {
+	if f.relayState(t, 2) != relay.Off {
 		t.Error("zone_2 valve opened while zone_1 was still draining")
 	}
-	if f.relayState(t, 3) != relay.On {
+	if f.relayState(t, 1) != relay.On {
 		t.Error("zone_1 valve closed before its drain completed")
 	}
 
 	// zone_1 completes and its valve closes; only then does zone_2 run.
 	f.waitCycleResult(t, "zone_1", ResultComplete, 8*time.Second)
-	if f.relayState(t, 3) != relay.Off {
+	if f.relayState(t, 1) != relay.Off {
 		t.Error("zone_1 valve still open after cycle complete")
 	}
 	f.waitCycleResult(t, "zone_2", ResultComplete, 8*time.Second)
+}
+
+// TestDrainOnlyOpensValveWithoutPump: the touch-screen "Drain" action opens
+// the shelf's valve for the drain window and never touches the pump.
+func TestDrainOnlyOpensValveWithoutPump(t *testing.T) {
+	f := newFixture(t)
+	z, _ := f.zones.GetByKey("zone_1")
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 2})
+	z.ConfigJSON = string(cfg)
+	if err := f.zones.Update(*z); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DrainOnly: true, TriggerType: "manual_touch"}); err != nil {
+		t.Fatalf("enqueue drain: %v", err)
+	}
+	sawValveOpen := false
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.relayState(t, devices.PumpChannel) == relay.On {
+			t.Fatal("pump turned on during a drain-only request")
+		}
+		if f.relayState(t, 1) == relay.On {
+			sawValveOpen = true
+		}
+		if sawValveOpen && f.relayState(t, 1) == relay.Off {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !sawValveOpen {
+		t.Fatal("valve never opened for drain")
+	}
+	cycle := f.waitCycleResult(t, "zone_1", ResultComplete, 5*time.Second)
+	if cycle.TriggerSource == nil || *cycle.TriggerSource != "drain" {
+		t.Errorf("drain cycle not tagged as drain: %+v", cycle.TriggerSource)
+	}
+	if f.relayState(t, 1) != relay.Off {
+		t.Error("valve still open after drain complete")
+	}
+}
+
+// TestAbortedFloodStillDrains: a safety abort mid-flood (reservoir drops below
+// the minimum) stops the pump but holds the valve open for the drain window
+// before closing — the tray must never be left full (2026-11-10).
+func TestAbortedFloodStillDrains(t *testing.T) {
+	f := newFixture(t)
+	z, _ := f.zones.GetByKey("zone_1")
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 3})
+	z.ConfigJSON = string(cfg)
+	if err := f.zones.Update(*z); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 10, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	// Wait for flooding, then drop the reservoir below the safety minimum.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && f.relayState(t, devices.PumpChannel) != relay.On {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if f.relayState(t, devices.PumpChannel) != relay.On {
+		t.Fatal("pump never started")
+	}
+	f.insertLevel(t, 5)
+	// Pump must drop; valve must remain open (draining) rather than slam shut.
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && f.relayState(t, devices.PumpChannel) == relay.On {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if f.relayState(t, devices.PumpChannel) == relay.On {
+		t.Fatal("pump still on after reservoir-low")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if f.relayState(t, 1) != relay.On {
+		t.Error("valve closed immediately on abort; expected drain-back with valve open")
+	}
+	if st := f.engine.Status(); st.Active == nil || st.Active.State != StateDraining {
+		t.Errorf("engine state during abort-drain = %+v, want draining", st.Active)
+	}
+	cycle := f.waitCycleResult(t, "zone_1", ResultAborted, 8*time.Second)
+	if cycle.AbortReason == nil || !strings.Contains(*cycle.AbortReason, "safety abort") {
+		t.Errorf("abort reason = %v", cycle.AbortReason)
+	}
+	if f.relayState(t, 1) != relay.Off {
+		t.Error("valve still open after abort-drain finished")
+	}
+}
+
+// TestDrainAllowedUnderReservoirLockout: a reservoir lockout blocks watering
+// but must NOT block a drain — that is exactly when the tray needs emptying.
+func TestDrainAllowedUnderReservoirLockout(t *testing.T) {
+	f := newFixture(t)
+	z, _ := f.zones.GetByKey("zone_1")
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 1})
+	z.ConfigJSON = string(cfg)
+	f.zones.Update(*z)
+	f.insertLevel(t, 5) // below the 20 % minimum → reservoir_low lockout
+	time.Sleep(150 * time.Millisecond)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 5, TriggerType: "manual_web"}); err == nil {
+		t.Fatal("watering should be refused under reservoir lockout")
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DrainOnly: true, TriggerType: "manual_touch"}); err != nil {
+		t.Fatalf("drain refused under reservoir lockout: %v", err)
+	}
+	f.waitCycleResult(t, "zone_1", ResultComplete, 5*time.Second)
+	if f.relayState(t, devices.PumpChannel) == relay.On {
+		t.Fatal("pump ran during drain")
+	}
+}
+
+// TestFloodAbortsWhenValveClosedUnderneath (audit 2.4): a manual valve-off
+// during a flood would dead-head the pump; the engine must notice within
+// about a second and stop the pump.
+func TestFloodAbortsWhenValveClosedUnderneath(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 60, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	f.waitState(t, "zone_1", StateFlooding, 3*time.Second)
+	f.mgr.SetRelay(context.Background(), 1, relay.Off, "manual_web", "bench script", 0)
+	cycle := f.waitCycleResult(t, "zone_1", ResultAborted, 4*time.Second)
+	if cycle.AbortReason == nil || !strings.Contains(*cycle.AbortReason, "during flood") {
+		t.Errorf("abort reason = %v", cycle.AbortReason)
+	}
+	if f.relayState(t, devices.PumpChannel) != relay.Off {
+		t.Error("pump left on after valve closed underneath it")
+	}
+	if !f.hasEvent(t, "irrigation_abort_no_drain") {
+		t.Error("expected irrigation_abort_no_drain (valve already closed, nothing to drain)")
+	}
+}
+
+// TestEstopAbortsWithoutFakeDrain (audit 2.6): e-stop aborts the cycle via
+// the supervisor hook and the engine does not sit "draining" for the drain
+// window with the valve already forced closed.
+func TestEstopAbortsWithoutFakeDrain(t *testing.T) {
+	f := newFixture(t)
+	f.setDrain(t, "zone_1", 10)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 60, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_2", DurationSeconds: 60, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue zone_2: %v", err)
+	}
+	f.waitState(t, "zone_1", StateFlooding, 3*time.Second)
+	start := time.Now()
+	f.sup.EmergencyStop(context.Background(), "manual_touch", "test")
+	cycle := f.waitCycleResult(t, "zone_1", ResultAborted, 4*time.Second)
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("abort took %v; should not wait out the 10 s drain", took)
+	}
+	if cycle.AbortReason == nil || !strings.Contains(*cycle.AbortReason, "safety_supervisor") {
+		t.Errorf("abort reason = %v, want the e-stop's stop-all", cycle.AbortReason)
+	}
+	if !f.hasEvent(t, "irrigation_abort_no_drain") {
+		t.Error("expected irrigation_abort_no_drain event")
+	}
+	if st := f.engine.Status(); st.Active != nil || len(st.Queue) != 0 {
+		t.Errorf("engine not idle after e-stop: %+v", st)
+	}
+	f.sup.Reset("test")
+}
+
+// TestStopDuringDrainRecordsAborted (audit 2.13 F14): a Stop that cuts the
+// drain-back short is an abort, not a complete.
+func TestStopDuringDrainRecordsAborted(t *testing.T) {
+	f := newFixture(t)
+	f.setDrain(t, "zone_1", 5)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	f.waitState(t, "zone_1", StateDraining, 5*time.Second)
+	if err := f.engine.Stop("zone_1", "manual_touch"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	cycle := f.waitCycleResult(t, "zone_1", ResultAborted, 3*time.Second)
+	if cycle.AbortReason == nil || *cycle.AbortReason != "stopped by manual_touch" {
+		t.Errorf("abort reason = %v", cycle.AbortReason)
+	}
+	if f.relayState(t, 1) != relay.Off {
+		t.Error("valve still open after stop")
+	}
+}
+
+// TestDrainOnlyDurationCapped (audit 2.7): a drain request cannot hold a
+// valve open (and block every other shelf) for days.
+func TestDrainOnlyDurationCapped(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DrainOnly: true, DurationSeconds: 999999, TriggerType: "manual_touch"}); err == nil {
+		t.Fatal("oversized drain accepted")
+	}
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DrainOnly: true, DurationSeconds: -5, TriggerType: "manual_touch"}); err == nil {
+		t.Fatal("negative drain accepted")
+	}
+}
+
+// TestAllOffDuringFloodDoesNotFakeDrain (audit 2.6): the all-off handler
+// stops the engine and then forces every relay off; the engine must not sit
+// "draining" for the drain window with the valve already closed.
+func TestAllOffDuringFloodDoesNotFakeDrain(t *testing.T) {
+	f := newFixture(t)
+	f.setDrain(t, "zone_1", 10)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 60, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	f.waitState(t, "zone_1", StateFlooding, 3*time.Second)
+	start := time.Now()
+	f.engine.StopAll("manual_web")
+	f.mgr.AllOff(context.Background(), "manual_web", "all-off requested")
+	cycle := f.waitCycleResult(t, "zone_1", ResultAborted, 4*time.Second)
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("abort took %v; should not wait out the 10 s drain with the valve closed", took)
+	}
+	if cycle.AbortReason == nil || !strings.Contains(*cycle.AbortReason, "stop all") {
+		t.Errorf("abort reason = %v", cycle.AbortReason)
+	}
+	if st := f.engine.Status(); st.Active != nil {
+		t.Errorf("engine still active after all-off: %+v", st.Active)
+	}
 }

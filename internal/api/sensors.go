@@ -134,6 +134,13 @@ func (s *Server) handleModbusScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "scan range must satisfy 1 <= start <= end <= 247")
 		return
 	}
+	// A scan holds the bus for up to ~50 s; the reservoir reading goes stale
+	// and the supervisor aborts a running flood (audit 2026-11-10, 2.8).
+	if active := s.irrigation.Status().Active; active != nil {
+		writeError(w, http.StatusConflict,
+			"irrigation cycle active on "+active.ZoneKey+" — wait for it to finish before scanning the bus")
+		return
+	}
 	found, err := s.sensors.ScanBus(r.Context(), uint8(start), uint8(end))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

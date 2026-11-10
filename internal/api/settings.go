@@ -80,6 +80,39 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		if key == "automation" {
+			// Same shape check as maintenance: a typo'd value must not be
+			// stored, because the automation loop reads this key every tick
+			// and treats anything unreadable as disabled (audit 2.9).
+			var v struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err := json.Unmarshal(raw, &v); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid automation config: "+err.Error())
+				return
+			}
+			prev := false
+			if cur, ok, _ := s.settingsRepo.Get("automation"); ok {
+				var pv struct {
+					Enabled bool `json:"enabled"`
+				}
+				_ = json.Unmarshal([]byte(cur), &pv)
+				prev = pv.Enabled
+			}
+			body, _ := json.Marshal(v)
+			if err := s.settingsRepo.Set(key, string(body)); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if v.Enabled != prev {
+				if v.Enabled {
+					s.eventLog.Info("automation_enabled", "irrigation automation enabled", "api", nil)
+				} else {
+					s.eventLog.Warn("automation_disabled", "irrigation automation disabled", "api", nil)
+				}
+			}
+			continue
+		}
 		if err := s.settingsRepo.Set(key, string(raw)); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

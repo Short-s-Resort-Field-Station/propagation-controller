@@ -27,7 +27,7 @@ const addrRegister = 0x07D0
 
 func main() {
 	port := flag.String("port", "", "serial port of the RS485 adapter (autodetected if empty)")
-	baud := flag.Int("baud", 4800, "baud rate (ZTS-3000 factory default is 4800)")
+	baud := flag.Int("baud", 9600, "baud rate (bus runs at 9600 as built; a factory-fresh ZTS-3000 answers at 4800 — pass -baud 4800 -from 1 for a new probe)")
 	from := flag.Uint("from", 1, "current slave address of the probe")
 	to := flag.Uint("to", 0, "new slave address (1..247, required)")
 	yes := flag.Bool("yes", false, "actually write; without this the tool only reports what it would do")

@@ -10,4 +10,4 @@ exec chromium \
   --disable-pinch \
   --overscroll-history-navigation=0 \
   --check-for-update-interval=31536000 \
-  --app=http://localhost/ui/touch
+  --app=http://localhost/propagate/ui/touch

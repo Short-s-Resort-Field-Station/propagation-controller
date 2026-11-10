@@ -2,9 +2,11 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePort scripts the Numato conversation: each Write queues the next canned
@@ -13,9 +15,15 @@ type fakePort struct {
 	writes  []string
 	replies []string
 	cur     *strings.Reader
+	// writeErr makes every Write fail — a yanked USB cable.
+	writeErr error
+	closed   bool
 }
 
 func (f *fakePort) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
 	f.writes = append(f.writes, string(p))
 	if len(f.replies) > 0 {
 		f.cur = strings.NewReader(f.replies[0])
@@ -35,14 +43,60 @@ func (f *fakePort) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (f *fakePort) Close() error { return nil }
+func (f *fakePort) Close() error { f.closed = true; return nil }
 
 func newTestDriver(replies ...string) (*NumatoUSB, *fakePort) {
 	port := &fakePort{replies: replies}
 	n := NewNumatoUSB("/dev/fake")
 	n.port = port
+	n.wantOpen = true
 	n.health.Status = "online"
 	return n, port
+}
+
+// TestIOErrorDropsPortAndReopensAfterBackoff: a write failure closes the
+// port, the next command inside the backoff fails fast without touching the
+// device, and once the backoff passes the driver reopens and the command
+// goes through (audit 2026-11-10, 2.2b).
+func TestIOErrorDropsPortAndReopensAfterBackoff(t *testing.T) {
+	n, broken := newTestDriver()
+	broken.writeErr = errors.New("input/output error")
+	fresh := &fakePort{replies: []string{"relay off 6\n\r>"}}
+	opens := 0
+	n.openFn = func(string) (io.ReadWriteCloser, error) { opens++; return fresh, nil }
+
+	ctx := context.Background()
+	if err := n.SetChannel(ctx, 7, Off); err == nil {
+		t.Fatal("expected the broken port to fail")
+	}
+	if !broken.closed || n.port != nil {
+		t.Fatal("port not dropped after I/O error")
+	}
+	if h := n.Health(ctx); h.Status != "error" {
+		t.Errorf("health after I/O error = %q, want error", h.Status)
+	}
+	// Inside the backoff: fail fast, no reopen attempt.
+	if err := n.SetChannel(ctx, 7, Off); err == nil || opens != 0 {
+		t.Fatalf("expected fast failure inside backoff (err=%v opens=%d)", err, opens)
+	}
+	// Backoff elapsed: reopen and succeed.
+	n.mu.Lock()
+	n.nextReopen = time.Time{}
+	n.mu.Unlock()
+	if err := n.SetChannel(ctx, 7, Off); err != nil {
+		t.Fatalf("SetChannel after reopen: %v", err)
+	}
+	if opens != 1 || fresh.writes[0] != "relay off 6\r" {
+		t.Errorf("reopen did not happen as expected (opens=%d writes=%v)", opens, fresh.writes)
+	}
+	if h := n.Health(ctx); h.Status != "online" || h.Info["reopened_at"] == "" {
+		t.Errorf("health after reopen = %+v", h)
+	}
+	// Close must stop the reopen loop.
+	n.Close()
+	if err := n.SetChannel(ctx, 7, Off); err == nil || opens != 1 {
+		t.Errorf("command after Close should fail without reopening (err=%v opens=%d)", err, opens)
+	}
 }
 
 func TestSetChannelMapsToZeroIndexedWire(t *testing.T) {

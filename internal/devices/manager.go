@@ -15,29 +15,42 @@ import (
 	"propagation-controller/internal/storage"
 )
 
-// Relay assignments (spec §7.1, updated 2026-07-05: fans on 7).
-// All circulation fans are ganged on one relay — they're single-speed 12V
-// units and Austin wants a simple on/off toggle.
+// Relay assignments — AS BUILT (propagation_wiring.html Rev A, verified on
+// the bench 2026-11-09). Numbers here are the spec's 1-indexed channels; the
+// Numato driver maps N → N-1 on the wire, so software 8 = silkscreen 7.
+//
+//	wire 0-2  valves 1-3 (12 V)      software 1-3
+//	wire 3    fans, ganged (12→5 V)  software 4
+//	wire 4-5  spare                  software 5-6 (5 reserved for a 4th valve)
+//	wire 6    pump (120 VAC)         software 7
+//	wire 7    T5 lights (120 VAC)    software 8
+//
+// All circulation fans are ganged on one relay — they're single-speed units
+// and Austin wants a simple on/off toggle. Lights are rack-wide: one relay,
+// one schedule, all eight fixtures on or off together.
 var DefaultAssignments = map[int]string{
-	1: "Barina grow lights",
-	2: "SEAFLO diaphragm pump",
-	3: "Solenoid Valve 1 (Shelf 1)",
-	4: "Solenoid Valve 2 (Shelf 2)",
-	5: "Solenoid Valve 3 (Shelf 3)",
-	6: "Solenoid Valve 4 (Shelf 4, future)",
-	7: "Circulation fans",
-	8: "Spare",
+	1: "Solenoid Valve 1 (Shelf 1)",
+	2: "Solenoid Valve 2 (Shelf 2)",
+	3: "Solenoid Valve 3 (Shelf 3)",
+	4: "Circulation fans",
+	5: "Spare (reserved: Solenoid Valve 4)",
+	6: "Spare",
+	7: "Hydrofarm pump (120 VAC)",
+	8: "T5 grow lights (120 VAC)",
 }
 
 const (
-	LightsChannel = 1
-	PumpChannel   = 2
-	FansChannel   = 7
+	LightsChannel = 8
+	PumpChannel   = 7
+	FansChannel   = 4
 )
 
-// safeOffChannels are forced off at startup and shutdown (spec §12.2): pump
-// and valves. Lights are left to the (future) lighting module.
-var safeOffChannels = []int{2, 3, 4, 5, 6}
+// SafeOffChannels are forced off at startup, shutdown, and by the watchdog's
+// forced safe state (spec §12.2): valves, fans, spares, and the pump — every
+// channel but the lights, which the lighting module owns. The Numato holds
+// its last state on external 12 V, so an open valve or a running fan with
+// nobody driving it is a real hazard (audit 2026-11-10, 2.5).
+var SafeOffChannels = []int{1, 2, 3, FansChannel, 5, 6, PumpChannel}
 
 type RelayInfo struct {
 	Channel int         `json:"channel"`
@@ -57,6 +70,10 @@ type Manager struct {
 
 	mu     sync.Mutex
 	timers map[int]*time.Timer
+	// lastStatus is the controller status last written to the device
+	// registry; syncHealth updates the registry when the driver's health
+	// changes (reopen after a USB drop, or a drop itself).
+	lastStatus string
 }
 
 // AttachHub enables live relay_action events over SSE.
@@ -76,10 +93,11 @@ func NewManager(ctrl relay.Controller, driverName string, actions *storage.Relay
 }
 
 // Start opens the relay controller, registers devices, and applies the safe
-// startup state: pump and valves forced off (spec §12.2).
+// startup state: everything but the lights forced off (spec §12.2).
 func (m *Manager) Start(ctx context.Context) error {
 	if err := m.ctrl.Open(ctx); err != nil {
 		m.registerDevices("offline")
+		m.lastStatus = "offline"
 		m.events.Error("relay_controller_offline",
 			"relay controller failed to open; automation must remain suspended", "startup",
 			map[string]any{"error": err.Error()})
@@ -90,19 +108,20 @@ func (m *Manager) Start(ctx context.Context) error {
 		status = "simulated"
 	}
 	m.registerDevices(status)
+	m.lastStatus = status
 
-	for _, ch := range safeOffChannels {
+	for _, ch := range SafeOffChannels {
 		if _, err := m.SetRelay(ctx, ch, relay.Off, "startup", "safe startup state", 0); err != nil {
 			m.events.Error("startup_safe_state_failed",
 				fmt.Sprintf("failed to force relay %d off at startup", ch), "startup",
 				map[string]any{"channel": ch, "error": err.Error()})
 		}
 	}
-	m.events.Info("startup_safe_state", "pump and valves forced off at startup", "startup", nil)
+	m.events.Info("startup_safe_state", "pump, valves, fans and spares forced off at startup", "startup", nil)
 	return nil
 }
 
-// Shutdown forces pump and valves off, cancels pending timeouts, and closes
+// Shutdown forces SafeOffChannels off, cancels pending timeouts, and closes
 // the controller (spec §9.4: automatic stop on controller shutdown).
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
@@ -112,7 +131,7 @@ func (m *Manager) Shutdown(ctx context.Context) {
 	}
 	m.mu.Unlock()
 
-	for _, ch := range safeOffChannels {
+	for _, ch := range SafeOffChannels {
 		if _, err := m.SetRelay(ctx, ch, relay.Off, "system", "controller shutdown", 0); err != nil {
 			m.events.Error("shutdown_safe_state_failed",
 				fmt.Sprintf("failed to force relay %d off at shutdown", ch), "system",
@@ -134,6 +153,7 @@ func (m *Manager) SetRelay(ctx context.Context, channel int, state relay.State,
 	}
 
 	err = m.ctrl.SetChannel(ctx, channel, state)
+	m.syncHealth(ctx)
 
 	action := storage.RelayAction{
 		RelayChannel:   channel,
@@ -217,6 +237,7 @@ func (m *Manager) AllOff(ctx context.Context, actor, reason string) error {
 // Snapshot returns current channel states with their assigned names.
 func (m *Manager) Snapshot(ctx context.Context) ([]RelayInfo, error) {
 	states, err := m.ctrl.GetAll(ctx)
+	m.syncHealth(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +262,25 @@ func (m *Manager) GetRelay(ctx context.Context, channel int) (RelayInfo, error) 
 
 func (m *Manager) ControllerHealth(ctx context.Context) relay.Health {
 	return m.ctrl.Health(ctx)
+}
+
+// syncHealth mirrors the driver's status into the device registry when it
+// changes, so a dropped-and-reopened port shows up in /devices and the
+// event log rather than only in the health endpoint (audit 2026-11-10, 2.2b).
+func (m *Manager) syncHealth(ctx context.Context) {
+	status := m.ctrl.Health(ctx).Status
+	m.mu.Lock()
+	changed := status != m.lastStatus
+	m.lastStatus = status
+	m.mu.Unlock()
+	if !changed {
+		return
+	}
+	m.registerDevices(status)
+	if status == "online" || status == "simulated" {
+		m.events.Info("relay_controller_recovered", "relay controller reachable again", "system",
+			map[string]any{"status": status})
+	}
 }
 
 func (m *Manager) registerDevices(status string) {

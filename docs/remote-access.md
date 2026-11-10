@@ -72,3 +72,41 @@ Security notes:
   the touchscreen.
 - The emergency stop requires a Grower sign-in (a public e-stop button would
   be a denial-of-service invitation).
+
+## 2026-11-10 — chosen layout: `shortsfieldstation.org/propagate` (unlisted)
+
+Austin wants the dashboard on the main domain at an unlisted path rather than
+a subdomain. Pieces, all in `deploy/`:
+
+1. **App served under `/propagate/`** — web bundle built with Vite
+   `base: "/propagate/"`, API at `/propagate/api/v1`, and the Go router mounts
+   the whole app under `PublicPrefix` (`internal/api/router.go`) as well as the
+   bare root; `/` and `/ui/touch` redirect to the prefixed pages. Kiosk opens
+   `http://localhost/propagate/ui/touch`.
+2. **Tunnel** (`deploy/cloudflared/config.yml`) — `unit01.shortsfieldstation.org`
+   → `http://localhost:80` on the Piconium. That hostname exists only as the
+   Worker's origin; nothing links to it.
+3. **Worker** (`deploy/cloudflare/propagate-worker/`) — route
+   `shortsfieldstation.org/propagate*` on the main zone proxies to the tunnel,
+   streams SSE, forwards cookies, sets `X-Robots-Tag: noindex`. Worker routes
+   take precedence over the Cloudflare Pages site for that path only.
+
+One-time setup (needs Austin's Cloudflare login, browser-based):
+
+```sh
+# on the Piconium (as root)
+curl -fsSL -o /root/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+dpkg -i /root/cloudflared.deb
+cloudflared tunnel login                      # opens a browser URL — authorize shortsfieldstation.org
+cloudflared tunnel create propagation-unit-01
+cloudflared tunnel route dns propagation-unit-01 unit01.shortsfieldstation.org
+mkdir -p /etc/cloudflared && cp /root/.cloudflared/<tunnel-id>.json /etc/cloudflared/propagation-unit-01.json
+cp /opt/propagation-controller/deploy/cloudflared/config.yml /etc/cloudflared/config.yml
+cloudflared service install && systemctl enable --now cloudflared
+
+# on the Mac, in deploy/cloudflare/propagate-worker
+npx wrangler login                            # browser
+npx wrangler deploy
+```
+
+Verify: `curl -sI https://shortsfieldstation.org/propagate/ | grep -i -E "x-robots|HTTP/"` → 200 + noindex; the rest of the site untouched.

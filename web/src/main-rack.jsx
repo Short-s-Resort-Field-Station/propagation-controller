@@ -76,11 +76,18 @@ function App() {
         <RackDisplay2
           shelves={state.shelves}
           reservoir={state.reservoir}
+          reservoirOnline={state.reservoirOnline}
           rackStatus={state.rackStatus}
+          lockouts={state.lockouts}
+          lastSync={state.lastSync}
+          toast={state.toast}
+          onDismissToast={actions.dismissToast}
           layout={layout}
           clock={state.clock}
           day={fmtDay()}
           onWater={actions.water}
+          onDrain={actions.drain}
+          onStop={actions.stop}
           onLight={actions.lights}
           onFan={actions.fans}
           theme={theme}

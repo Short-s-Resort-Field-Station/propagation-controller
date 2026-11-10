@@ -11,8 +11,8 @@ type Species struct {
 	ID         string `json:"id"` // botanical ID, e.g. QUMA
 	Common     string `json:"common_name"`
 	Latin      string `json:"latin_name"`
-	Category   string `json:"category"` // canopy | nurse | riparian | wildlife | specialty | shrub | vine
-	Method     string `json:"method"`   // seed | cuttings | hybrid
+	Category   string `json:"category"`   // canopy | nurse | riparian | wildlife | specialty | shrub | vine
+	Method     string `json:"method"`     // seed | cuttings | hybrid
 	Difficulty int    `json:"difficulty"` // 1 (easiest) – 5
 }
 

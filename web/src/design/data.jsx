@@ -17,6 +17,7 @@ PG.STATUS = {
   Inactive:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'—' },
   Maintenance:  { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'PAUSED' },     // change 2: automation suspended
   Disabled:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'DISABLED' },   // change 2: assigned but paused
+  'Locked Out': { col:'var(--i-oxblood)', inkCol:'var(--oxblood)',    sev:'ACTION REQUIRED' }, // audit 3.11: safety lockout
 };
 
 PG.RACK_STATUS = {
@@ -25,6 +26,7 @@ PG.RACK_STATUS = {
   Draining:    { col:'var(--i-river)',  ink:'var(--river-deep)' }, // live-edit (ebb-flow)
   Fault:       { col:'var(--i-oxblood)',ink:'var(--oxblood)' },
   Maintenance: { col:'var(--i-ochre)',  ink:'var(--ochre-deep)' },
+  'Locked Out':{ col:'var(--i-oxblood)',ink:'var(--oxblood)' }, // audit 3.11: pump locked out by the safety supervisor
 };
 
 // ---- the four shelves ----
@@ -77,7 +79,7 @@ PG.ROLES = {
 // ---- reservoir (7-gallon jug = 26.5 L; Austin, 2026-07-06) ----
 // EST_DAILY_L is a placeholder consumption estimate until pump flow is
 // calibrated on real hardware.
-PG.TANK_L = 26.5;
+PG.TANK_L = 18.9; // 5-gal bucket reservoir, 13 in full (Austin, 2026-11-10)
 PG.EST_DAILY_L = 4;
 PG.tankLiters = (pct) => Math.round((pct / 100) * PG.TANK_L * 10) / 10;
 PG.tankDays = (pct) => Math.max(0, Math.round(PG.tankLiters(pct) / PG.EST_DAILY_L));
@@ -212,7 +214,7 @@ function EventBars({ data, w=820, h=120, pad=28, color='var(--river)' }){
 // manual's front page) — replaces the placeholder tree-in-a-square mark.
 function ForestMark({ size=44 }){
   return (
-    <img src="/seal.png" width={size} height={size} alt="Dept. of Forestry & Fire"
+    <img src={(import.meta.env && import.meta.env.BASE_URL ? import.meta.env.BASE_URL : '/') + 'seal.png'} width={size} height={size} alt="Dept. of Forestry & Fire"
       style={{display:'block', objectFit:'contain'}}/>
   );
 }

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"time"
 
+	"propagation-controller/internal/devices"
 	"propagation-controller/internal/devices/relay"
 	"propagation-controller/internal/watchdog"
 )
@@ -35,12 +36,13 @@ func main() {
 		*healthURL, *interval, *failThreshold, *restartLimit)
 
 	d := watchdog.NewDecider(*failThreshold, *restartLimit)
+	relays := watchdog.NewRelayMonitor(3)
 	client := &http.Client{Timeout: 5 * time.Second}
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		healthy := checkHealth(client, *healthURL)
+		healthy := checkHealth(client, *healthURL, relays)
 		switch d.Step(healthy) {
 		case watchdog.ActionRestart:
 			logf("health failing — restarting propagationd")
@@ -55,10 +57,14 @@ func main() {
 	}
 }
 
-// checkHealth: alive means the endpoint answers 200 with database "ok".
-// A degraded relay/modbus still counts as alive — the service itself is up
-// and surfacing the problem; restarting would not help.
-func checkHealth(client *http.Client, url string) bool {
+// checkHealth: alive means the endpoint answers 200 with database "ok" and
+// the relay controller reachable. A degraded modbus bus still counts as
+// alive — the service is up and surfacing the problem; restarting would not
+// help. A relay controller that stays unreachable is different: the relays
+// hold their last state and nothing can switch the pump off, so after three
+// consecutive bad readings the restart → seize → force-off ladder runs
+// (audit 2026-11-10, 2.2a).
+func checkHealth(client *http.Client, url string, relays *watchdog.RelayMonitor) bool {
 	resp, err := client.Get(url)
 	if err != nil {
 		logf("health check failed: %v", err)
@@ -70,7 +76,8 @@ func checkHealth(client *http.Client, url string) bool {
 		return false
 	}
 	var body struct {
-		Database string `json:"database"`
+		Database        string `json:"database"`
+		RelayController string `json:"relay_controller"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		logf("health response unreadable: %v", err)
@@ -80,12 +87,17 @@ func checkHealth(client *http.Client, url string) bool {
 		logf("database reports %q", body.Database)
 		return false
 	}
+	if !relays.Step(body.RelayController) {
+		logf("relay controller reports %q for %d consecutive checks", body.RelayController, relays.Threshold)
+		return false
+	}
 	return true
 }
 
-// forceSafeState opens the Numato directly and turns off the pump, valves,
-// and fans (channels 2–7). Lights are left alone — a dead controller is no
-// reason to dark the plants.
+// forceSafeState opens the Numato directly and turns off every channel in
+// devices.SafeOffChannels (valves 1-3, fans 4, spares 5-6, pump 7 — the
+// as-built map). Lights (8) are left alone — a dead controller is no reason
+// to dark the plants.
 func forceSafeState(port string) {
 	if port == "" {
 		detected, err := relay.DetectNumatoPort()
@@ -103,7 +115,7 @@ func forceSafeState(port string) {
 		return
 	}
 	defer ctrl.Close()
-	for ch := 2; ch <= 7; ch++ {
+	for _, ch := range devices.SafeOffChannels {
 		if err := ctrl.SetChannel(ctx, ch, relay.Off); err != nil {
 			logf("relay %d off failed: %v", ch, err)
 		} else {

@@ -4,6 +4,10 @@ import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  // Served under /propagate/ (public reverse proxy; the Go server mounts the
+  // same tree at /propagate/ and redirects / and /ui/touch there). Every asset
+  // URL the build emits is prefixed, so the bundle works at either origin.
+  base: '/propagate/',
   build: {
     outDir: 'dist',
     rollupOptions: {
@@ -17,7 +21,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/propagate/api': 'http://localhost:8090',
       '/api': 'http://localhost:8090',
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: false,
+    include: ['src/**/*.test.{js,jsx}'],
   },
 });

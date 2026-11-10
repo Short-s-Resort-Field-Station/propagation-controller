@@ -1,6 +1,10 @@
 // Maps propagationd API responses onto the design handoff's state shapes
 // (§7 Data Model & Contract). The UI is a pure function of what this builds.
 
+// Relay channel (spec 1-indexed) carrying the ganged circulation fans — as
+// built: Numato silkscreen 3. Keep in sync with devices.FansChannel.
+export const FANS_RELAY = 4;
+
 const CAT_STRIPE = {
   canopy: 'var(--sage-deep)', nurse: 'var(--ochre)', riparian: 'var(--river)',
   wildlife: 'var(--ochre)', specialty: 'var(--oxblood)', shrub: 'var(--sage)',
@@ -37,6 +41,20 @@ function eventColor(e) {
   return 'var(--sage)';
 }
 
+// Audit 3.8: zone_key "zone_7" → "07"; falls back to list position only when
+// the key carries no number.
+export function shelfNumber(zoneKey, index = 0) {
+  const m = /zone_(\d+)/.exec(zoneKey || '');
+  return String(m ? Number(m[1]) : index + 1).padStart(2, '0');
+}
+
+// Audit 3.8: a shelf's temperature/EC keys are siblings of its moisture key
+// (soil_zone_2_moisture → soil_zone_2_temperature), never the array index.
+export function siblingKey(sensorKey, name) {
+  if (!sensorKey) return null;
+  return sensorKey.replace(/_moisture$/, '_' + name);
+}
+
 // Build the design's shelf objects from zones + sensors + lighting + rules.
 export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, maintenance }) {
   const engine = zonesResp.engine || {};
@@ -46,23 +64,34 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
   const activeState = engine.active_cycle ? engine.active_cycle.state : null;
   const queuedZones = new Set((engine.queue || []).map((q) => q.zone_key));
 
-  // Rack-wide readings (one soil probe in v1 serves temp for all shelves)
-  // plus per-shelf substrate EC (µS/cm) keyed by sensor key.
-  let soilTempF = null;
+  // Per-shelf root-zone temperature (°F) and substrate EC (µS/cm), keyed by
+  // sensor key — every shelf has its own probe as of the 2026-11-09 build.
+  const tempFByKey = {};
   const ecByKey = {};
   for (const dev of sensorsResp.sensors || []) {
     for (const m of dev.measurements || []) {
-      if (m.name === 'temperature' && m.value != null) soilTempF = cToF(m.value);
+      if (m.name === 'temperature' && m.value != null) tempFByKey[m.sensor_key] = cToF(m.value);
       if (m.name === 'ec' && m.value != null) ecByKey[m.sensor_key] = Math.round(m.value);
     }
   }
 
-  const fansOn = (relays.relays || []).some((r) => r.channel === 7 && r.state === 'on');
+  const fansOn = (relays.relays || []).some((r) => r.channel === FANS_RELAY && r.state === 'on');
   const lightOn = lighting.relay_state === 'on';
   const sch = lighting.schedule || {};
+  // Audit 3.10: a manual override is shown wherever the lights are toggled.
+  const lightOverride = lighting.override
+    ? { mode: lighting.override.mode, until: lighting.override.until || null, actor: lighting.override.actor || '' }
+    : null;
+  // Audit 3.2: the active cycle's real phase + duration, for the kiosk label.
+  const cycle = engine.active_cycle
+    ? { state: engine.active_cycle.state, duration: engine.active_cycle.duration_seconds || 0 }
+    : null;
 
   return (zonesResp.zones || []).map((z, i) => {
-    const n = String(i + 1).padStart(2, '0');
+    // Audit 3.8: shelf number + probe keys come from the zone itself, not the
+    // array index — zones may be deleted or renamed.
+    const n = shelfNumber(z.zone_key, i);
+    const sensorKey = z.soil_sensor_key || null;
     const cfg = z.config || {};
     const rule = rules[z.zone_key];
     const lo = rule ? Math.round(rule.trigger_below) : 0;
@@ -102,7 +131,13 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
     return {
       n,
       zoneKey: z.zone_key,
+      sensorKey,
       active: z.enabled,
+      // Audit 3.2/3.4: this shelf's live cycle phase (null when idle).
+      cycle: z.zone_key === activeZone ? cycle : null,
+      // Audit 3.11: whether a moisture rule exists — without one there is no
+      // target band to draw ("Target · not set").
+      hasRule: !!rule,
       // change 2: a paused shelf (assigned but disabled) vs a vacant bay.
       assigned,
       species,
@@ -131,12 +166,16 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
         coolMin: rule ? rule.minimum_interval_minutes : null,
         maxCycles: rule ? rule.max_cycles_per_day : null,
       },
+      // A probe is "present" when its sensor is reporting, regardless of the
+      // value — a probe in air legitimately reads 0.0 %VWC (bring-up 2026-11-09).
+      probe: !!(z.enabled && z.soil_sensor_key && sensorFresh),
       moisture: z.enabled ? moisture : 0,
-      temp: z.enabled && soilTempF != null ? soilTempF : 0,
-      ec: z.enabled ? (ecByKey[`soil_zone_${i + 1}_ec`] ?? null) : null,
+      temp: z.enabled ? (tempFByKey[siblingKey(sensorKey, 'temperature')] ?? 0) : 0,
+      ec: z.enabled ? (ecByKey[siblingKey(sensorKey, 'ec')] ?? null) : null,
       lo: lo || 40,
       hi: hi || 70,
       light: lightOn,
+      lightOverride,
       on: sch.on_time || '—',
       off: sch.off_time || '—',
       fan: fansOn,
@@ -164,10 +203,19 @@ export function buildRackStatus({ health, safety, zonesResp, maintenance }) {
     // as Watering/Draining; the maintenance banner shows the mode separately.
     return zonesResp.engine.active_cycle.state === 'draining' ? 'Draining' : 'Watering';
   }
+  // Audit 3.11: a safety lockout means Water Now is guaranteed to 409 — say
+  // so in the header instead of "Operational".
+  if (buildLockouts(safety).length) return 'Locked Out';
   // change 2 (maintenance): the rack header reads Maintenance while suspended,
   // unless a safety fault or an active cycle takes precedence above.
   if (maintenance) return 'Maintenance';
   return 'Operational';
+}
+
+// Audit 3.11: active safety lockout keys (e.g. "pump_max_runtime",
+// "reservoir_low"), shown in the rack header / dashboard status cell.
+export function buildLockouts(safety) {
+  return ((safety && safety.lockouts) || []).map((l) => l.key || String(l)).filter(Boolean);
 }
 
 // change 2 (maintenance): read the maintenance switch from GET /settings.
@@ -193,14 +241,25 @@ export function buildLog(eventsResp) {
   }));
 }
 
-export function buildReservoir(sensorsResp) {
-  for (const dev of sensorsResp.sensors || []) {
+// Audit 3.9: the reservoir percentage is only trusted while its level
+// measurement is fresh (< 5 min). A stale/absent probe reports online:false so
+// the surfaces draw "— %" and "sensor offline" instead of a confident number.
+export const RESERVOIR_STALE_MS = 5 * 60e3;
+export function buildReservoir(sensorsResp, now = Date.now()) {
+  for (const dev of (sensorsResp && sensorsResp.sensors) || []) {
     if (dev.type !== 'reservoir_sensor') continue;
     for (const m of dev.measurements || []) {
-      if (m.value != null) return Math.round(m.value);
+      if (m.name !== 'level') continue;
+      const readAt = m.read_at ? new Date(m.read_at).getTime() : NaN;
+      const fresh = m.value != null && Number.isFinite(readAt) && now - readAt < RESERVOIR_STALE_MS;
+      return {
+        pct: fresh ? Math.max(0, Math.min(100, Math.round(m.value))) : 0,
+        online: fresh,
+        readAt: Number.isFinite(readAt) ? fmtClock(new Date(readAt)) : '—',
+      };
     }
   }
-  return 0;
+  return { pct: 0, online: false, readAt: '—' };
 }
 
 // Map the backend species register onto the AssignModal's catalog shape.

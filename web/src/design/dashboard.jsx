@@ -1,6 +1,6 @@
 import React from 'react';
 import { PG, ForestMark, LineChart, EventBars } from './data.jsx';
-import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, MaintenanceBanner, PhotoRail } from './flows.jsx';
+import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner, PhotoRail } from './flows.jsx';
 
 // pgui-dashboard.jsx — the web dashboard (paper). Tabs:
 // Dashboard · Shelf Management · Environmental · Controls
@@ -8,15 +8,22 @@ import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar,
 const DB_TABS = ['Dashboard','Shelf Management','Environmental','Controls'];
 
 // ---------- DASHBOARD (overview + log) ----------
-function OverviewTab({ shelves, reservoir, rackStatus, log, alerts, onOpenAlerts, onOpenHistory }){
+function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, alerts, onOpenAlerts, onOpenHistory }){
   const active = shelves.filter(s=>s.active);
   const rs = PG.RACK_STATUS[rackStatus] || PG.RACK_STATUS.Operational;
   const issues = shelves.filter(s=>s.active && (s.status==='Monitoring'||s.status==='Dry'||s.status==='Sensor Fault'));
   const vacant = shelves.length - active.length;
-  const watering = shelves.filter(s=>s.status==='Watering').length;
+  const watering = shelves.filter(s=>s.status==='Watering'||s.status==='Draining').length;
+  // audit 3.11: a lockout names itself in the status cell
+  const statusNote = rackStatus==='Operational' ? 'All subsystems nominal'
+    : rackStatus==='Locked Out' ? 'Pump locked out · '+(lockouts.length ? lockouts.join(', ').replace(/_/g,' ') : 'see safety')
+    : 'Check diagnostics';
   const cells = [
-    { k:'Rack Status', v:rackStatus, dot:rs.col, n: rackStatus==='Operational'?'All subsystems nominal':'Check diagnostics' },
-    { k:'Reservoir', v:reservoir, unit:'%', n:`≈ ${PG.tankDays(reservoir)} days remaining` },
+    { k:'Rack Status', v:rackStatus, dot:rs.col, n: statusNote },
+    // audit 3.9: a stale level probe shows "—" and says so; days are an estimate
+    reservoirOnline
+      ? { k:'Reservoir', v:reservoir, unit:'%', n:`est. ${PG.tankDays(reservoir)} days remaining` }
+      : { k:'Reservoir', v:'—', unit:'%', n:'level sensor offline' },
     { k:'Active Shelves', v:active.length, unit:' / '+shelves.length, n: vacant? vacant+(vacant===1?' bay':' bays')+' unassigned':'All bays assigned' },
     { k:'Watering Now', v:watering, n: watering? 'Cycle in progress':'Pump at rest' },
     { k:'Active Alerts', v:issues.length, n: issues.length? issues[0].status+' · Shelf '+issues[0].n : 'None outstanding' },
@@ -64,19 +71,21 @@ function OverviewTab({ shelves, reservoir, rackStatus, log, alerts, onOpenAlerts
           <div className="pb">
             <div style={{display:'flex',alignItems:'flex-end',gap:14}}>
               <div style={{flex:'none',width:64,height:130,border:'1px solid var(--ink)',borderRadius:3,background:'var(--bone)',position:'relative',overflow:'hidden'}}>
-                <div style={{position:'absolute',left:0,right:0,bottom:0,height:reservoir+'%',background:'linear-gradient(180deg,var(--river),var(--river-deep))'}}></div>
+                <div style={{position:'absolute',left:0,right:0,bottom:0,height:(reservoirOnline?reservoir:0)+'%',background:'linear-gradient(180deg,var(--river),var(--river-deep))'}}></div>
                 <div style={{position:'absolute',inset:0,background:'repeating-linear-gradient(0deg,transparent 0 calc(20% - 1px),#1B181333 calc(20% - 1px) 20%)'}}></div>
               </div>
               <div>
-                <div style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:42,lineHeight:0.9}}>{reservoir}<span style={{fontSize:20,color:'var(--char)'}}>%</span></div>
+                <div style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:42,lineHeight:0.9}}>{reservoirOnline?reservoir:'—'}<span style={{fontSize:20,color:'var(--char)'}}>%</span></div>
                 <div className="mono" style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'#1B181399',marginTop:6,lineHeight:1.7}}>
-                  ≈ {PG.tankLiters(reservoir)} L on hand<br/>≈ {PG.tankDays(reservoir)} days remaining<br/>Trend · steady
+                  {reservoirOnline
+                    ? <React.Fragment>est. {PG.tankLiters(reservoir)} L on hand<br/>est. {PG.tankDays(reservoir)} days remaining<br/>Estimates · uncalibrated flow</React.Fragment>
+                    : <React.Fragment>level sensor offline<br/>no fresh reading<br/>check the reservoir probe</React.Fragment>}
                 </div>
               </div>
             </div>
             <div style={{marginTop:16,paddingTop:14,borderTop:'1px solid var(--rule-soft)'}} className="mono">
               <div style={{display:'flex',alignItems:'center',gap:9,fontSize:11,letterSpacing:'0.14em',textTransform:'uppercase'}}>
-                <span style={{width:9,height:9,borderRadius:'50%',background:reservoir>20?'var(--sage)':'var(--oxblood)'}}></span> {reservoir>20?'Level nominal':'Refill required'}
+                <span style={{width:9,height:9,borderRadius:'50%',background:!reservoirOnline?'var(--oxblood)':reservoir>20?'var(--sage)':'var(--oxblood)'}}></span> {!reservoirOnline?'Sensor offline':reservoir>20?'Level nominal':'Refill required'}
               </div>
             </div>
           </div>
@@ -105,17 +114,17 @@ function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
       {s.active ? (
         <React.Fragment>
           <div className="sc-mid">
-            <div><div className="mk">Moisture</div><div className="mv">{s.moisture>0 ? s.moisture : '—'}{s.moisture>0 && <span>%VWC</span>}</div></div>
+            <div><div className="mk">Moisture</div><div className="mv">{s.probe ? s.moisture : '—'}{s.probe && <span>%VWC</span>}</div></div>
             <div><div className="mk">Root Zone Temp</div><div className="mv">{s.temp>0 ? s.temp : '—'}{s.temp>0 && <span>°F</span>}</div></div>
           </div>
           <div className="sc-bar">
             <div className="mk" style={{marginBottom:7}}>Moisture vs. target band</div>
             <div className="barwrap">
               <i style={{width:s.moisture+'%',background:inBand?'var(--sage)':'var(--ochre)'}}></i>
-              <span className="tgt" style={{left:s.lo+'%'}}></span>
-              <span className="tgt" style={{left:s.hi+'%'}}></span>
+              {s.hasRule!==false && <span className="tgt" style={{left:s.lo+'%'}}></span>}
+              {s.hasRule!==false && <span className="tgt" style={{left:s.hi+'%'}}></span>}
             </div>
-            <div className="barlabels"><span>0%</span><span>Target {s.lo}–{s.hi}%</span><span>100%</span></div>
+            <div className="barlabels"><span>0%</span><span>{s.hasRule===false ? 'Target · not set' : `Target ${s.lo}–${s.hi}%`}</span><span>100%</span></div>
           </div>
           <div className="sc-foot">
             <div><div className="k">Lighting</div><div className="v">{s.light?'On · '+s.on:'Off'}</div></div>
@@ -124,7 +133,7 @@ function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
               <div className="v">{s.lastWater}</div>
               {s.lastWaterDate && <div className="k" style={{marginTop:3,letterSpacing:'0.08em'}}>{s.lastWaterDate}</div>}
             </div>
-            <div><div className="k">Usage · 24h</div><div className="v">{s.usage}</div></div>
+            <div><div className="k">Last cycle</div><div className="v">{s.usage}</div></div>
           </div>
           <div style={{padding:'0 18px 16px',display:'flex',gap:8}}>
             <button className="fx-btn" style={{flex:1}} disabled={readonly}
@@ -249,7 +258,10 @@ function EnvironmentalTab({ getSeries }){
       <div className="chart-card">
         <div className="ch-h">
           <div className="ch-t"><span className="sw" style={{background:'var(--oxblood)'}}></span>Root Zone Temperature · °F</div>
-          <div className="ch-leg"><span><i style={{background:'var(--oxblood)'}}></i>Rack mean</span></div>
+          <div className="ch-leg">
+            {(isLive ? (live.tempLegend||[]) : [{color:'var(--oxblood)',label:'Rack mean'}]).map((l,i)=>(
+              <span key={i}><i style={{background:l.color}}></i>{l.label}</span>))}
+          </div>
         </div>
         {temp.length
           ? <div className="cb"><LineChart datasets={temp} yMin={tLo} yMax={tHi} fmtY={v=>v+'°'}/></div>
@@ -305,7 +317,7 @@ function EnvironmentalTab({ getSeries }){
               ))}
             </div>
             <div style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',fontSize:13,marginTop:14,lineHeight:1.5}}>
-              Share of hourly readings inside each shelf's target band over the selected period — for historical cross-checking against plant health. Monitoring only; the unit senses substrate EC &amp; root zone temperature but doesn't control them. Temperature is rack-wide until each shelf has its own probe.
+              Share of hourly readings inside each shelf's target band over the selected period — for historical cross-checking against plant health. Monitoring only; the unit senses substrate EC &amp; root zone temperature but doesn't control them. Each shelf is scored against its own probe.
             </div>
           </div>
         </div>
@@ -405,10 +417,19 @@ function ControlsTab({ role, controls }){
             <Slider label="Hours of light" sub="Off time follows automatically" value={photo.hours} min={1} max={23} unit="h" onChange={v=>setP('hours',v)} disabled={readonly}/>
             <div className="ctrl-row"><div className="cl">Lights off at<small>Computed</small></div><div className="cv">{String(offH).padStart(2,'0')}<span>:00</span></div></div>
             <PhotoRail onH={photo.on} hours={photo.hours}/>
+            {/* audit 3.10: the toggle is a 2-hour override (it lapses back to the
+                schedule on its own); the active override is shown and can be
+                cleared with Auto. Viewers see it read-only. */}
             <div className="ctrl-row" style={{marginTop:4}}>
-              <div className="cl">Manual override<small>Force lights on now</small></div>
-              <ManualToggle on={controls?controls.lightOn:undefined}
-                onToggle={controls?controls.manualLight:undefined}/>
+              <div className="cl">Manual override<small>{controls && controls.lightOverride
+                ? `Forced ${controls.lightOverride.mode}${controls.lightOverride.until ? ' until '+fmtClockIso(controls.lightOverride.until) : ' until cleared'}`
+                : 'Force lights on for 2 h'}</small></div>
+              <div style={{display:'flex',alignItems:'center',gap:12}}>
+                {controls && controls.lightOverride && controls.clearLight && !readonly &&
+                  <button className="fx-btn" style={{padding:'5px 10px'}} onClick={controls.clearLight}>Auto</button>}
+                <ManualToggle on={controls?controls.lightOn:undefined}
+                  onToggle={controls?controls.manualLight:undefined} disabled={readonly}/>
+              </div>
             </div>
           </div>
         </div>
@@ -430,12 +451,14 @@ function ControlsTab({ role, controls }){
   );
 }
 
-function ManualToggle({ on, onToggle }){
+function ManualToggle({ on, onToggle, disabled=false }){
   const [local,setLocal]=React.useState(false);
   const state = on !== undefined ? on : local;
-  const flip = ()=> onToggle ? onToggle(!state) : setLocal(!state);
-  return <div className={'toggle'+(state?' on':'')} onClick={flip}><i></i></div>;
+  const flip = ()=>{ if(disabled) return; onToggle ? onToggle(!state) : setLocal(!state); };
+  return <div className={'toggle'+(state?' on':'')} onClick={flip} aria-disabled={disabled}
+    style={disabled?{opacity:0.45,cursor:'default'}:undefined} title={disabled?'Sign in to override lighting':undefined}><i></i></div>;
 }
+const fmtClockIso = (iso)=>{ const d=new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
 
 // Deep-linkable tabs: "/#environmental", "/#controls", "/#shelves".
 // Build AssignModal initial values from a live shelf (quick-edit).
@@ -466,10 +489,13 @@ function initialTab(){
 
 // `auth` (live build): { SignInModal, canManage, openOperators } — swaps the
 // demo PIN sign-in for the real one and adds operator management for admins.
-function Dashboard({ shelves, reservoir, rackStatus, log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles }){
+function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, onEmergencyStop, onSafetyReset, signInRequest=0 }){
   const [tab, setTab] = React.useState(initialTab);
   const [assignFor, setAssignFor] = React.useState(null);
   const [showSignIn, setShowSignIn] = React.useState(false);
+  const [showEstop, setShowEstop] = React.useState(false); // audit 3.3: confirm e-stop / reset
+  // audit 3.10/3.11: the live build bumps signInRequest on any 401 → reopen sign-in
+  React.useEffect(()=>{ if(signInRequest) setShowSignIn(true); }, [signInRequest]);
   const [showSignOut, setShowSignOut] = React.useState(false);
   const [showAlerts, setShowAlerts] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
@@ -490,9 +516,12 @@ function Dashboard({ shelves, reservoir, rackStatus, log, session, onSignIn, onS
   const role = ses ? ses.role : null;
 
   const canToggleMaint = role && role!=='Viewer' && onSetMaintenance;
+  const canStop = role && role!=='Viewer' && (onEmergencyStop || onSafetyReset);
   return (
     <div className="db">
-      {connection==='offline' && <OfflineBanner/>}
+      {connection==='offline' && <OfflineBanner lastSync={lastSync}/>}
+      {/* audit 3.3: e-stop banner outranks maintenance. */}
+      {estop && <EstopBanner canManage={!!(canStop && onSafetyReset)} onReset={()=>setShowEstop(true)}/>}
       {/* change 2: maintenance banner sits under any offline banner. */}
       {maintenance && <MaintenanceBanner canManage={!!canToggleMaint} onExit={()=>setShowMaint(true)}/>}
       <div className="db-top">
@@ -524,12 +553,20 @@ function Dashboard({ shelves, reservoir, rackStatus, log, session, onSignIn, onS
             <span style={{width:9,height:9,borderRadius:'50%',background:maintenance?'var(--ochre-deep)':'var(--char)'}}></span>
             {maintenance?'Maintenance On':'Maintenance'}
           </div>}
+        {/* audit 3.3: emergency stop / reset safety (Grower+). Confirms both ways. */}
+        {canStop &&
+          <div className={'db-user db-estop'+(estop?' active':'')} onClick={()=>setShowEstop(true)}
+            title={estop?'Reset the safety supervisor':'Emergency stop — all outputs off'}>
+            {estop?'Reset safety':'E-STOP'}
+          </div>}
         <div className="db-statuschip">
           <span className="d" style={{background:rs.col}}></span>{rackStatus}
         </div>
       </div>
+      {/* audit 3.1: the last rejected command, under the top bar. */}
+      {toast && <div className="db-toast" onClick={onDismissToast} role="status"><span className="d"></span>{toast.text}</div>}
       <div className="db-body">
-        {tab==='Dashboard' && <OverviewTab shelves={effShelves} reservoir={reservoir} rackStatus={rackStatus} log={log} alerts={alerts} onOpenAlerts={()=>setShowAlerts(true)} onOpenHistory={()=>setShowHistory(true)}/>}
+        {tab==='Dashboard' && <OverviewTab shelves={effShelves} reservoir={reservoir} reservoirOnline={reservoirOnline} rackStatus={rackStatus} lockouts={lockouts} log={log} alerts={alerts} onOpenAlerts={()=>setShowAlerts(true)} onOpenHistory={()=>setShowHistory(true)}/>}
         {tab==='Shelf Management' && <ShelvesTab shelves={effShelves}
           onAssign={(n)=>setAssignFor({n})}
           onEdit={(s)=>setAssignFor({n:s.n, initial:editInitial(s)})}
@@ -544,6 +581,15 @@ function Dashboard({ shelves, reservoir, rackStatus, log, session, onSignIn, onS
         onClear={onUnassign ? (n)=>{ onUnassign(n); setAssignFor(null); } : undefined}
         onDisable={onSetEnabled ? (n)=>{ onSetEnabled(n, false); setAssignFor(null); } : undefined}
         profiles={profiles}/>}
+      {/* audit 3.3: confirm e-stop / reset. */}
+      {showEstop && <Confirm
+        title={estop?'Reset safety':'Emergency stop'}
+        body={estop
+          ? 'Clear the emergency stop? Automation resumes; any lockouts still in force stay until their condition clears.'
+          : 'Stop everything now? Pump, valves and lighting are switched off and held off until a Grower or Steward resets safety.'}
+        confirmLabel={estop?'Reset':'E-STOP'} danger={!estop}
+        onCancel={()=>setShowEstop(false)}
+        onConfirm={()=>{ (estop ? onSafetyReset : onEmergencyStop)?.(); setShowEstop(false); }}/>}
       {/* change 2: confirm entering/leaving maintenance mode. */}
       {showMaint && <Confirm
         title={maintenance?'Resume automation':'Enter maintenance mode'}

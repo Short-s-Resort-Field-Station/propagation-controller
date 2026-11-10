@@ -58,49 +58,56 @@ func NewService(bus modbus.Bus, readings *storage.ReadingRepo, devices *storage.
 	}
 }
 
-// EnsureDefaults seeds sensor devices on first boot. Register maps are
-// placeholders for the common generic-RS485 layouts and MUST be verified
-// against the vendor datasheets at hardware bring-up — they are editable at
-// runtime via PATCH /api/v1/sensors/{key}/config, no code changes needed.
+// EnsureDefaults seeds sensor devices. Each key is seeded independently if
+// missing, so an existing install picks up new shelves without a reset.
+// Register maps are bench-verified (docs/AS-BUILT.md, 2026-11-09) and remain
+// editable at runtime via PATCH /api/v1/sensors/{key}/config.
 func (s *Service) EnsureDefaults() error {
-	existing, err := s.devices.ListByType("soil_sensor")
-	if err != nil {
-		return err
+	soil := func(addr uint8) Config {
+		return Config{
+			ModbusAddress:       addr,
+			PollIntervalSeconds: 10,
+			Registers: []RegisterSpec{
+				{Name: "moisture", Register: 0, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "%"},
+				{Name: "temperature", Register: 1, FunctionCode: 3, DataType: "int16", Scale: 0.1, Unit: "°C"},
+				// ZTS-3000 probe: EC in µS/cm at register 2, no scaling (verified
+				// against the real sensor 2026-07-10; it has no pH channel). The
+				// channel pins at 20000 — readings there are clipped, not real.
+				{Name: "ec", Register: 2, FunctionCode: 3, DataType: "uint16", Scale: 1, Unit: "µS/cm", ClipAt: f64(20000)},
+			},
+		}
 	}
-	reservoirs, err := s.devices.ListByType("reservoir_sensor")
-	if err != nil {
-		return err
-	}
-	if len(existing) > 0 || len(reservoirs) > 0 {
-		return nil
-	}
-
-	soil := Config{
+	// Hydrostatic level transmitter at its FACTORY settings: address 1, 9600
+	// baud. It does not persist configuration writes across power loss (proven
+	// three times 2026-11-10), so the bus runs at 9600 and the soil probes —
+	// which do persist — were moved to 11-13 instead. Nothing on this bus ever
+	// needs re-commissioning after an outage.
+	// Register 4 is level ×10 in cm (1 decimal, unit code 17, range 100.0 cm).
+	// "level" is the percent-of-full figure the safety supervisor and the tank
+	// gauge consume: scale = 100 / full-depth-in-mm. ReservoirFullDepthMM is a
+	// placeholder until the reservoir is measured at calibration.
+	reservoir := Config{
 		ModbusAddress:       1,
 		PollIntervalSeconds: 10,
 		Registers: []RegisterSpec{
-			{Name: "moisture", Register: 0, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "%"},
-			{Name: "temperature", Register: 1, FunctionCode: 3, DataType: "int16", Scale: 0.1, Unit: "°C"},
-			// ZTS-3000 probe: EC in µS/cm at register 2, no scaling (verified
-			// against the real sensor 2026-07-10; it has no pH channel). The
-			// channel pins at 20000 — readings there are clipped, not real.
-			{Name: "ec", Register: 2, FunctionCode: 3, DataType: "uint16", Scale: 1, Unit: "µS/cm", ClipAt: f64(20000)},
+			{Name: "level", Register: 4, FunctionCode: 3, DataType: "uint16", Scale: 100.0 / ReservoirFullDepthMM, Unit: "%"},
+			{Name: "level_cm", Register: 4, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "cm"},
 		},
 	}
-	reservoir := Config{
-		ModbusAddress:       2,
-		PollIntervalSeconds: 10,
-		Registers: []RegisterSpec{
-			{Name: "level", Register: 0, FunctionCode: 3, DataType: "uint16", Scale: 0.1, Unit: "%"},
-		},
-	}
+	seeded := 0
 	for _, seed := range []struct {
 		key, name, typ string
 		cfg            Config
 	}{
-		{"soil_zone_1", "Soil Sensor Zone 1", "soil_sensor", soil},
+		// ZTS-3000 probes at 11-13 (shelf + 10) @ 9600; see docs/AS-BUILT.md.
+		{"soil_zone_1", "Soil Sensor Shelf 1", "soil_sensor", soil(11)},
+		{"soil_zone_2", "Soil Sensor Shelf 2", "soil_sensor", soil(12)},
+		{"soil_zone_3", "Soil Sensor Shelf 3", "soil_sensor", soil(13)},
 		{"reservoir_level", "Reservoir Level", "reservoir_sensor", reservoir},
 	} {
+		if existing, err := s.devices.GetByKey(seed.key); err == nil && existing != nil {
+			continue
+		}
 		body, err := json.Marshal(seed.cfg)
 		if err != nil {
 			return err
@@ -108,10 +115,19 @@ func (s *Service) EnsureDefaults() error {
 		if err := s.devices.Upsert(seed.key, seed.name, seed.typ, "generic_modbus", string(body), "unknown"); err != nil {
 			return err
 		}
+		seeded++
 	}
-	s.events.Info("sensors_seeded", "default sensor configurations created (verify register maps against datasheets)", "startup", nil)
+	if seeded > 0 {
+		s.events.Info("sensors_seeded", fmt.Sprintf("%d sensor configuration(s) created", seeded), "startup", nil)
+	}
 	return nil
 }
+
+// ReservoirFullDepthMM is the water depth, sensor tip to surface, when the
+// reservoir is full: a 5-gallon bucket, 13 in (Austin, 2026-11-10). The
+// transmitter reads ~1 cm high at 6 in; calibrate zero/span against a ruler
+// before trusting litres-on-hand.
+const ReservoirFullDepthMM = 330.0
 
 // Start launches a poller per enabled sensor. Also registers the bus itself
 // as a device.

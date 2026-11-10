@@ -7,6 +7,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './design/pgui.css';
+import './live/overrides.css';
 import { PG } from './design/data.jsx';
 import { AssignModal } from './design/flows.jsx';
 import { Dashboard } from './design/dashboard.jsx';
@@ -54,25 +55,47 @@ const hash = (typeof location !== 'undefined' ? location.hash : '').replace('#',
 function App(){
   // Touch face (dark instrument) — 880×528 canvas. #touch = overview,
   // #touch-detail = a shelf's detail view (where disable/maintenance live).
-  if (hash === 'touch' || hash === 'touch-detail' || hash === 'touch-maint') {
+  //   #touch-home-maint  = 3 plates + maintenance + a toast (audit 3.7 / 3.1)
+  //   #touch-busy        = detail while Draining (Stop row, audit 3.2–3.4)
+  //   #touch-offline     = detail while the controller is offline (audit 3.6)
+  //   #touch-locked      = home with a safety lockout in the header (3.11)
+  if (hash.startsWith('touch')) {
+    const three = demoShelves.slice(0,3).map((s,i)=> i===0 ? {...s, species:'Bald Cypress + Possumhaw Holly', hasRule:false} : s);
+    const busyShelves = three.map((s)=> s.n==='01' ? {...s, status:'Draining', cycle:{state:'draining', duration:300}} : s);
+    const variants = {
+      'touch':            { shelves:three, rackStatus:'Operational' },
+      'touch-detail':     { shelves:three, rackStatus:'Operational', maintenance:true, initialOpen:'01' },
+      'touch-maint':      { shelves:three, rackStatus:'Maintenance', maintenance:true, initialOpen:'01' },
+      'touch-home-maint': { shelves:three, rackStatus:'Maintenance', maintenance:true, toast:{text:'Water: pump is locked out: pump_max_runtime', at:0} },
+      'touch-busy':       { shelves:busyShelves, rackStatus:'Draining', initialOpen:'01' },
+      'touch-offline':    { shelves:three, rackStatus:'Operational', connection:'offline', initialOpen:'01', lastSync:'14:21' },
+      'touch-locked':     { shelves:three, rackStatus:'Locked Out', lockouts:['pump_max_runtime'], reservoirOnline:false },
+    };
+    const v = variants[hash] || variants.touch;
     return (
       <div style={{width:880, height:528, background:'#14110C'}}>
-        <RackDisplay2 shelves={demoShelves} reservoir={78} rackStatus={hash==='touch-maint'?'Maintenance':'Operational'}
+        <RackDisplay2 shelves={v.shelves} reservoir={78} reservoirOnline={v.reservoirOnline!==false} rackStatus={v.rackStatus}
+          lockouts={v.lockouts||[]} toast={v.toast||null} lastSync={v.lastSync||'14:32'}
           layout="gauges" clock="14:32" day="07 / 09 / 26" theme="dark"
-          maintenance={hash!=='touch'} initialOpen={hash==='touch'?null:'01'}
-          onWater={()=>{}} onLight={()=>{}} onFan={()=>{}} onThemeToggle={()=>{}}
-          onSetMaintenance={()=>{}} onSetEnabled={()=>{}} onUnlock={()=>{}} connection="online" locked={false} />
+          maintenance={!!v.maintenance} initialOpen={v.initialOpen||null}
+          onWater={()=>Promise.resolve(true)} onDrain={()=>Promise.resolve(true)} onStop={()=>Promise.resolve(true)}
+          onLight={()=>{}} onFan={()=>{}} onThemeToggle={()=>{}}
+          onSetMaintenance={()=>{}} onSetEnabled={()=>{}} onUnlock={()=>{}} connection={v.connection||'online'} locked={false} />
       </div>
     );
   }
   // Any hash except '' (edit modal) or 'assign' (new modal) renders the
   // dashboard; the Dashboard's own initialTab reads the hash so #shelves,
   // #environmental, #controls, #dashboard land on the right tab.
+  //   #dash-estop = e-stop banner + toast + lockout status (audit 3.1 / 3.3)
   if (hash && hash !== 'assign') {
+    const estop = hash === 'dash-estop';
     return (
       <div className="live-db">
-        <Dashboard shelves={demoShelves} reservoir={78} rackStatus="Operational" log={PG.initialLog()}
-          session={{name:'A. Short', role:'Steward'}} alerts={[]} connection="online"
+        <Dashboard shelves={demoShelves} reservoir={78} reservoirOnline={!estop} rackStatus={estop?'Fault':'Operational'} log={PG.initialLog()}
+          session={{name:'A. Short', role:'Steward'}} alerts={[]} connection="online" lastSync="14:21"
+          estop={estop} onEmergencyStop={()=>{}} onSafetyReset={()=>{}}
+          toast={estop?{text:'Water: sign in required to control the unit', at:0}:null}
           getSeries={null} controls={null} profiles={demoProfiles}
           onAssign={()=>{}} onSetEnabled={()=>{}} onUnassign={()=>{}} onSetMaintenance={()=>{}} />
       </div>

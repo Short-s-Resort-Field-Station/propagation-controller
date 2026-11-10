@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // photoperiod must not fall back to UTC on a box without zoneinfo
 
 	"propagation-controller/internal/api"
 	"propagation-controller/internal/auth"
@@ -134,10 +135,14 @@ func main() {
 	if err := engine.SeedDefaults(); err != nil {
 		log.Error().Err(err).Msg("failed to seed irrigation zones")
 	}
+	// E-stop aborts the active cycle and clears the queue before the relays
+	// are forced, so the engine never sits "draining" against a closed
+	// valve (audit 2026-11-10, 2.6).
+	supervisor.OnEmergencyStop(func() { engine.StopAll("safety_supervisor") })
 	engine.Start(ctx)
 
 	scheduleRepo := storage.NewScheduleRepo(db)
-	lightSvc := lighting.NewService(mgr, supervisor, scheduleRepo, eventLog, log, 15*time.Second)
+	lightSvc := lighting.NewService(mgr, supervisor, scheduleRepo, settingsRepo, eventLog, log, 15*time.Second)
 	if err := lightSvc.EnsureDefault("America/Chicago"); err != nil {
 		log.Error().Err(err).Msg("failed to seed lighting schedule")
 	}
@@ -177,7 +182,14 @@ func main() {
 		Log:        log,
 		Simulation: cfg.Simulation,
 	})
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: router}
+	srv := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: router,
+		// Slow-loris protection on a box with port 80 open to the subnet;
+		// no WriteTimeout because /events/stream is long-lived SSE.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

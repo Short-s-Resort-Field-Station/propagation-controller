@@ -350,8 +350,25 @@ function LockScreen({ clock, onUnlock }){
 }
 
 /* ============ FLOW 3 · OFFLINE ============ */
-function OfflineBanner({ lastSync='14:32' }){
-  return (<div className="ban web"><span className="d"></span>Controller unreachable — showing last-known readings from {lastSync} · retrying…</div>);
+// Audit 3.6: lastSync is the real time of the last successful refresh ("—"
+// if none has landed yet this session).
+function OfflineBanner({ lastSync='—' }){
+  return (<div className="ban web"><span className="d"></span>{lastSync && lastSync!=='—'
+    ? `Controller unreachable — showing last-known readings from ${lastSync} · retrying…`
+    : 'Controller unreachable — no readings received yet · retrying…'}</div>);
+}
+
+// Audit 3.3: emergency stop is active — every output is held off until a
+// Grower/Steward resets the safety supervisor.
+function EstopBanner({ onReset, canManage }){
+  return (
+    <div className="ban web">
+      <span className="d"></span>
+      Emergency stop active — pump, valves and lighting held off until safety is reset
+      {canManage && onReset &&
+        <button className="fx-btn" style={{marginLeft:'auto',padding:'5px 12px'}} onClick={onReset}>Reset safety</button>}
+    </div>
+  );
 }
 
 /* ============ change 2 · MAINTENANCE MODE ============ */
@@ -457,4 +474,4 @@ function Confirm({ title, body, confirmLabel, danger, onConfirm, onCancel }){
   );
 }
 
-export { Stepper, PinPad, PhotoRail, AssignModal, SignInModal, LockScreen, OfflineBanner, MaintenanceBanner, AlertBar, AlertsModal, HistoryModal, Confirm };
+export { Stepper, PinPad, PhotoRail, AssignModal, SignInModal, LockScreen, OfflineBanner, EstopBanner, MaintenanceBanner, AlertBar, AlertsModal, HistoryModal, Confirm };

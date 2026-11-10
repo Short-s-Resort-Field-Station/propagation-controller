@@ -58,3 +58,25 @@ func TestBriefBlipDoesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestRelayMonitorTripsAfterThreshold(t *testing.T) {
+	m := NewRelayMonitor(3)
+	for i, st := range []string{"online", "error", "error"} {
+		if !m.Step(st) {
+			t.Fatalf("step %d (%q) should still be healthy", i, st)
+		}
+	}
+	if m.Step("offline") {
+		t.Fatal("third consecutive bad status must be unhealthy")
+	}
+	if m.Step("error") {
+		t.Fatal("stays unhealthy while the status stays bad")
+	}
+	// A good reading resets the count; it takes a full threshold again.
+	if !m.Step("simulated") || !m.Step("error") || !m.Step("error") {
+		t.Fatal("recovery did not reset the counter")
+	}
+	if m.Step("") {
+		t.Fatal("empty status counts as bad and trips at threshold")
+	}
+}

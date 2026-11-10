@@ -143,6 +143,11 @@ func (s *Server) handlePatchZone(w http.ResponseWriter, r *http.Request) {
 		cfg.DefaultRunSeconds = *p.DefaultRunSeconds
 	}
 	if p.DrainSeconds != nil {
+		// A negative value would leave the valve with no backstop timer.
+		if *p.DrainSeconds < 0 || *p.DrainSeconds > irrigation.MaxDrainSeconds {
+			writeError(w, http.StatusBadRequest, "drain_seconds must be between 0 and 3600")
+			return
+		}
 		cfg.DrainSeconds = *p.DrainSeconds
 	}
 	if p.TargetMoisture != nil {
@@ -255,6 +260,51 @@ func (s *Server) handleRunZone(w http.ResponseWriter, r *http.Request) {
 		"queue_position":   pos,
 		"zone_key":         zoneKey,
 		"duration_seconds": req.DurationSeconds,
+	})
+}
+
+// handleDrainZone opens a shelf's valve for its drain-back time with the pump
+// locked off (touch-screen "Drain"). Same queue as watering: one shelf at a
+// time. duration_seconds overrides the zone's drain_seconds; 0 = zone default.
+func (s *Server) handleDrainZone(w http.ResponseWriter, r *http.Request) {
+	zoneKey := chi.URLParam(r, "zone_key")
+	var req struct {
+		DurationSeconds int    `json:"duration_seconds"`
+		Reason          string `json:"reason"`
+		Actor           string `json:"actor"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+			return
+		}
+	}
+	actor := req.Actor
+	if actor == "" {
+		actor = "api"
+	}
+	if !allowedActors[actor] {
+		writeError(w, http.StatusBadRequest, "actor must be api, manual_web, or manual_touch")
+		return
+	}
+	pos, err := s.irrigation.Enqueue(irrigation.Request{
+		ZoneKey:         zoneKey,
+		DurationSeconds: req.DurationSeconds,
+		DrainOnly:       true,
+		TriggerType:     actor,
+		TriggerSource:   "drain",
+		Reason:          req.Reason,
+	})
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	status := "started"
+	if pos > 1 {
+		status = "queued"
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status": status, "queue_position": pos, "zone_key": zoneKey, "drain": true,
 	})
 }
 

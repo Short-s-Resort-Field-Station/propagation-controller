@@ -29,10 +29,10 @@ func TestScheduleFires(t *testing.T) {
 		Days: []string{"mon", "fri"}}
 
 	cases := []struct {
-		name       string
-		rule       ScheduleRule
-		last, now  time.Time
-		want       bool
+		name      string
+		rule      ScheduleRule
+		last, now time.Time
+		want      bool
 	}{
 		{"boundary inside window", rule, at("06:29:50"), at("06:30:10"), true},
 		{"window before start", rule, at("06:28:00"), at("06:29:50"), false},
@@ -99,7 +99,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	// Zero the ebb-and-flow default drain so automation cycles complete within
 	// the test window (the drain phase is covered in the irrigation package).
-	for _, zk := range []string{"zone_1", "zone_2", "zone_3", "zone_4"} {
+	for _, zk := range []string{"zone_1", "zone_2", "zone_3"} {
 		z, err := zones.GetByKey(zk)
 		if err != nil || z == nil {
 			continue
@@ -119,6 +119,10 @@ func newFixture(t *testing.T) *fixture {
 		engine: engine, cycles: cycles, zones: zones,
 		rules: storage.NewMoistureRuleRepo(db), readings: readings, events: eventRepo,
 		resID: dev.ID, now: time.Now(),
+	}
+	// Automation is off until switched on explicitly (fail-safe, audit 2.9).
+	if err := settings.Set("automation", `{"enabled":true}`); err != nil {
+		t.Fatalf("seed automation setting: %v", err)
 	}
 	f.svc = NewService(engine, zones, cycles, f.rules, readings, storage.NewScheduleRepo(db),
 		settings, eventLog, zerolog.Nop(), time.Hour /* loop not started; Tick() driven */)
@@ -342,4 +346,66 @@ func TestScheduledIrrigationEndToEnd(t *testing.T) {
 	if cycles[0].TriggerType != "schedule" {
 		t.Errorf("trigger_type = %q, want schedule", cycles[0].TriggerType)
 	}
+}
+
+// TestEnabledFailsSafe (audit 2.9): only an explicit {"enabled": true} turns
+// automation on; missing or malformed values read as off.
+func TestEnabledFailsSafe(t *testing.T) {
+	f := newFixture(t)
+	settings := f.svc.settings
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{`{"enabled":true}`, true},
+		{`{"enabled":false}`, false},
+		{`{"enabled":"true"}`, false},
+		{`{}`, false},
+		{`garbage`, false},
+	}
+	for _, c := range cases {
+		if err := settings.Set("automation", c.raw); err != nil {
+			t.Fatalf("set: %v", err)
+		}
+		if got := f.svc.Enabled(); got != c.want {
+			t.Errorf("Enabled() with %s = %v, want %v", c.raw, got, c.want)
+		}
+	}
+}
+
+// TestLargeClockGapSkipsSchedules (audit 2.10): a jump bigger than two ticks
+// (NTP sync after a cold boot) must not fire every schedule it crossed.
+func TestLargeClockGapSkipsSchedules(t *testing.T) {
+	f := newFixture(t)
+	rule, _ := json.Marshal(ScheduleRule{ZoneKey: "zone_2", StartTime: "06:30", DurationSeconds: 1})
+	loc, _ := time.LoadLocation("America/Chicago")
+	if err := f.svc.schedules.Upsert("sched_zone2", "Zone 2 morning", "irrigation",
+		true, "America/Chicago", string(rule), "skip"); err != nil {
+		t.Fatalf("upsert schedule: %v", err)
+	}
+	// Fixture interval is 1 h, so the cap is 2 h: a 5 h gap over 06:30 is a
+	// missed run.
+	base, _ := time.ParseInLocation("2006-01-02 15:04:05", "2026-07-08 04:00:00", loc)
+	f.svc.mu.Lock()
+	f.svc.lastCheck = base
+	f.svc.mu.Unlock()
+	f.now = base.Add(5 * time.Hour) // 09:00
+	f.insertReading(t, "reservoir_level_level", 80, time.Now())
+	f.svc.Tick()
+
+	time.Sleep(200 * time.Millisecond)
+	if cycles, _ := f.cycles.List("zone_2", 5); len(cycles) != 0 {
+		t.Fatalf("schedule fired across a clock jump: %+v", cycles)
+	}
+	evs, _ := f.events.List(storage.EventFilter{EventType: "schedule_catchup_skipped", Limit: 5})
+	if len(evs) != 1 {
+		t.Errorf("want one schedule_catchup_skipped event, got %d", len(evs))
+	}
+	// And the window after the cap still works: 06:29:50 → 06:30:10.
+	f.svc.mu.Lock()
+	f.svc.lastCheck = base.Add(2*time.Hour + 29*time.Minute + 50*time.Second)
+	f.svc.mu.Unlock()
+	f.now = base.Add(2*time.Hour + 30*time.Minute + 10*time.Second)
+	f.svc.Tick()
+	f.waitCycles(t, "zone_2", 1, 5*time.Second)
 }

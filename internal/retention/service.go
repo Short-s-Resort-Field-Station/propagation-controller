@@ -92,7 +92,9 @@ func (s *Service) aggregate() {
 // prune summarizes then deletes raw readings older than the window.
 func (s *Service) prune() {
 	cfg := s.config()
-	cutoff := time.Now().UTC().AddDate(0, 0, -cfg.RawDays)
+	// Hour-aligned so a prune never splits a bucket: the partial hour would
+	// be re-aggregated from the surviving rows and overwrite the full one.
+	cutoff := time.Now().UTC().AddDate(0, 0, -cfg.RawDays).Truncate(time.Hour)
 
 	// Aggregate everything below the cutoff before deleting it (spec §14.3
 	// step 2: verify aggregate completeness).

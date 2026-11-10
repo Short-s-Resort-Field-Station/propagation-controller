@@ -78,13 +78,20 @@ type ZoneConfig struct {
 	Stage       string `json:"stage,omitempty"`
 }
 
+// MaxDrainSeconds bounds a zone's drain_seconds and a drain-only request.
+const MaxDrainSeconds = 3600
+
 type Request struct {
-	ZoneKey         string    `json:"zone_key"`
-	DurationSeconds int       `json:"duration_seconds"`
-	TriggerType     string    `json:"trigger_type"`
-	TriggerSource   string    `json:"trigger_source,omitempty"`
-	Reason          string    `json:"reason,omitempty"`
-	EnqueuedAt      time.Time `json:"enqueued_at"`
+	ZoneKey         string `json:"zone_key"`
+	DurationSeconds int    `json:"duration_seconds"`
+	// DrainOnly opens the shelf's valve for its drain-back time with the pump
+	// locked off — "Drain" on the touch screen (Austin, 2026-11-10), for a tray
+	// left full by an interrupted cycle. Runs through the same one-shelf queue.
+	DrainOnly     bool      `json:"drain_only,omitempty"`
+	TriggerType   string    `json:"trigger_type"`
+	TriggerSource string    `json:"trigger_source,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	EnqueuedAt    time.Time `json:"enqueued_at"`
 }
 
 type ActiveCycle struct {
@@ -148,21 +155,19 @@ func (e *Engine) SeedDefaults() error {
 	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 300})
 	soil1 := "soil_zone_1_moisture"
 	seeds := []storage.Zone{
-		{ZoneKey: "zone_1", Name: "Shelf 1", ValveRelayChannel: 3, SoilSensorKey: &soil1,
+		{ZoneKey: "zone_1", Name: "Shelf 1", ValveRelayChannel: 1, SoilSensorKey: &soil1,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
-		{ZoneKey: "zone_2", Name: "Shelf 2", ValveRelayChannel: 4,
+		{ZoneKey: "zone_2", Name: "Shelf 2", ValveRelayChannel: 2,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
-		{ZoneKey: "zone_3", Name: "Shelf 3", ValveRelayChannel: 5,
+		{ZoneKey: "zone_3", Name: "Shelf 3", ValveRelayChannel: 3,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
-		{ZoneKey: "zone_4", Name: "Shelf 4 (future)", ValveRelayChannel: 6,
-			Enabled: false, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
 	}
 	for _, z := range seeds {
 		if err := e.zones.Insert(z); err != nil {
 			return err
 		}
 	}
-	e.events.Info("irrigation_zones_seeded", "default irrigation zones created (3 shelves + 1 disabled)", "startup", nil)
+	e.events.Info("irrigation_zones_seeded", "default irrigation zones created (3 shelves)", "startup", nil)
 	return nil
 }
 
@@ -170,6 +175,16 @@ func (e *Engine) Start(ctx context.Context) {
 	e.mu.Lock()
 	e.rootCtx = ctx
 	e.mu.Unlock()
+	// A cycle still "running" in the DB was interrupted by a crash or power
+	// loss (2026-11-10: a reboot mid-drain left a phantom "Watering"). The
+	// startup safe-state already closed its valve; close the record too.
+	if n, err := e.cycles.AbortInterrupted("interrupted by controller restart"); err != nil {
+		e.log.Error().Err(err).Msg("failed to abort interrupted cycles")
+	} else if n > 0 {
+		e.events.Warn("irrigation_cycles_interrupted",
+			fmt.Sprintf("%d irrigation cycle(s) were interrupted by a restart and marked aborted; tray may still hold water — use Drain", n),
+			"startup", map[string]any{"count": n})
+	}
 	go e.worker(ctx)
 }
 
@@ -225,16 +240,34 @@ func (e *Engine) Enqueue(req Request) (position int, err error) {
 	if !zone.Enabled {
 		return 0, fmt.Errorf("zone %q is disabled", req.ZoneKey)
 	}
-	if req.DurationSeconds <= 0 {
+	if req.DurationSeconds <= 0 && !req.DrainOnly {
 		return 0, fmt.Errorf("duration_seconds must be > 0")
 	}
-	if req.DurationSeconds > zone.MaxFloodSeconds {
+	if !req.DrainOnly && req.DurationSeconds > zone.MaxFloodSeconds {
 		return 0, fmt.Errorf("duration_seconds %d exceeds zone max flood duration %d",
 			req.DurationSeconds, zone.MaxFloodSeconds)
 	}
+	if req.DrainOnly {
+		// A drain holds the valve open and blocks every other shelf for its
+		// whole duration, so it is capped like a flood is (audit 2026-11-10,
+		// 2.7): the zone's own drain time or an hour, whichever is longer.
+		if req.DurationSeconds < 0 {
+			return 0, fmt.Errorf("duration_seconds must be >= 0")
+		}
+		var zcfg ZoneConfig
+		json.Unmarshal([]byte(zone.ConfigJSON), &zcfg)
+		if limit := max(zcfg.DrainSeconds, MaxDrainSeconds); req.DurationSeconds > limit {
+			return 0, fmt.Errorf("duration_seconds %d exceeds the drain limit of %d", req.DurationSeconds, limit)
+		}
+	}
 	// Fail fast on conditions that would only fail precheck later anyway.
-	if err := e.safety.Authorize(devices.PumpChannel, relay.On); err != nil {
-		return 0, err
+	// A drain never runs the pump, so a pump lockout (reservoir low/offline —
+	// the very faults that leave a tray full) must not refuse it. The valve
+	// path still honours e-stop via relayOnChecked (audit 2026-11-10, 2.1).
+	if !req.DrainOnly {
+		if err := e.safety.Authorize(devices.PumpChannel, relay.On); err != nil {
+			return 0, err
+		}
 	}
 
 	e.mu.Lock()
@@ -357,7 +390,12 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 
 	duration := min(req.DurationSeconds, zone.MaxFloodSeconds, zone.MaxPumpSeconds)
 	var source *string
-	if req.TriggerSource != "" {
+	if req.DrainOnly {
+		// Drain-only cycles are tagged so history and the UI can tell a
+		// drain from a watering (requested duration 0, no pump time).
+		drain := "drain"
+		source = &drain
+	} else if req.TriggerSource != "" {
 		source = &req.TriggerSource
 	}
 	cycleID, err := e.cycles.InsertStart(zone.ID, duration, req.TriggerType, source,
@@ -375,13 +413,40 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 		fmt.Sprintf("zone %s (%s) irrigation cycle started, %ds", zone.ZoneKey, zone.Name, duration),
 		req.TriggerType, map[string]any{"cycle_id": cycleID, "zone": zone.ZoneKey})
 
+	valveCh := zone.ValveRelayChannel
+
+	// --- drain only: valve open, pump never touched, then close ---
+	if req.DrainOnly {
+		drainFor := zcfg.DrainSeconds
+		if req.DurationSeconds > 0 {
+			drainFor = req.DurationSeconds
+		}
+		if drainFor <= 0 {
+			drainFor = 300
+		}
+		e.setState(StateOpeningValve)
+		if err := e.relayOnChecked(ctx, valveCh, drainFor+30); err != nil {
+			e.finish(cycleID, zone, nil, ResultFailed, "", "valve open failed: "+err.Error())
+			return
+		}
+		zero := 0
+		interrupted, err := e.drainAndClose(ctx, zone, valveCh, drainFor)
+		switch {
+		case err != nil:
+			e.finish(cycleID, zone, &zero, ResultFailed, "", "valve close failed: "+err.Error())
+		case interrupted:
+			e.finish(cycleID, zone, &zero, ResultAborted, e.takeStopReason("drain stopped"), "")
+		default:
+			e.finish(cycleID, zone, &zero, ResultComplete, "", "")
+		}
+		return
+	}
+
 	// --- precheck (spec §9.3) ---
 	if err := e.precheck(zone); err != nil {
 		e.finish(cycleID, zone, nil, ResultLockedOut, err.Error(), "")
 		return
 	}
-
-	valveCh := zone.ValveRelayChannel
 
 	// --- open valve, then pump: never pump against a closed manifold ---
 	e.setState(StateOpeningValve)
@@ -395,7 +460,12 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 
 	e.setState(StateStartingPump)
 	pumpBackstop := duration + 15
+	// Tell the supervisor the pump is ours from here until we report it
+	// stopped: a pump found on without this claim (e.g. after a relay
+	// outage) is an orphan it may switch off (audit 2026-11-10, 2.2c).
+	e.safety.SetPumpExpected(true)
 	if err := e.relayOnChecked(ctx, devices.PumpChannel, pumpBackstop); err != nil {
+		e.safety.SetPumpExpected(false)
 		e.relayOff(valveCh, "cycle failed before pump start")
 		e.finish(cycleID, zone, nil, ResultFailed, "", "pump start failed: "+err.Error())
 		return
@@ -404,49 +474,142 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 	// --- flooding ---
 	e.setState(StateFlooding)
 	floodStart := time.Now()
-	floodErr := e.flood(ctx, zone, zcfg, time.Duration(duration)*time.Second)
+	floodErr := e.flood(ctx, zone, valveCh, zcfg, time.Duration(duration)*time.Second)
 	actual := int(time.Since(floodStart).Seconds())
 
 	// --- stop pump first, then close valve (Austin: effectively together) ---
 	e.setState(StateStoppingPump)
 	pumpOffErr := e.relayOff(devices.PumpChannel, "irrigation cycle ending")
+	e.safety.SetPumpExpected(false)
 
 	if floodErr != nil {
-		e.relayOff(valveCh, "irrigation cycle aborted")
-		reason := floodErr.Error()
-		e.mu.Lock()
-		if e.stopReason != "" {
-			reason = e.stopReason
+		// Ebb-and-flow: an aborted flood still drains back. The pump is
+		// already off; holding the valve open returns the tray to the
+		// reservoir — which is exactly what a reservoir-low abort needs
+		// (2026-11-10: slamming the valve left Shelf 2 full). A second Stop,
+		// or e-stop, cuts the drain short.
+		reason := e.takeStopReason(floodErr.Error())
+		if e.canDrain(valveCh) {
+			e.events.Warn("irrigation_abort_draining",
+				fmt.Sprintf("zone %s flood aborted (%s); draining back for %ds before closing valve", zone.ZoneKey, reason, zcfg.DrainSeconds),
+				"system", map[string]any{"zone": zone.ZoneKey, "cycle_id": cycleID})
+			e.drainAndClose(e.rootCtx, zone, valveCh, zcfg.DrainSeconds)
+		} else {
+			// E-stop, all-off, or a manual valve command already closed the
+			// valve (or forbids opening it): waiting out a "drain" with the
+			// valve shut is dishonest, so close now and say so (audit
+			// 2026-11-10, 2.6).
+			e.events.Warn("irrigation_abort_no_drain",
+				fmt.Sprintf("zone %s flood aborted (%s); valve closed without drain-back — tray may hold water — use Drain", zone.ZoneKey, reason),
+				"system", map[string]any{"zone": zone.ZoneKey, "cycle_id": cycleID})
+			e.setState(StateClosingValve)
+			e.relayOff(valveCh, "irrigation aborted; no drain")
 		}
-		e.mu.Unlock()
 		e.finish(cycleID, zone, &actual, ResultAborted, reason, errText(pumpOffErr))
 		return
 	}
 
-	if zcfg.DrainSeconds > 0 {
-		e.setState(StateDraining)
-		// Valve stays open to drain; only an abort or e-stop cuts it short.
-		e.waitInterruptible(ctx, time.Duration(zcfg.DrainSeconds)*time.Second)
-	}
-
-	e.setState(StateClosingValve)
-	valveOffErr := e.relayOff(valveCh, "irrigation cycle complete")
+	interrupted, valveOffErr := e.drainAndClose(ctx, zone, valveCh, zcfg.DrainSeconds)
 
 	if pumpOffErr != nil || valveOffErr != nil {
 		e.finish(cycleID, zone, &actual, ResultFailed, "",
 			"relay off failed: "+errText(pumpOffErr)+errText(valveOffErr))
 		return
 	}
+	if interrupted {
+		// The flood itself finished; a Stop during drain-back is still an
+		// abort — the tray was not given its full drain (audit 2.13 F14).
+		e.finish(cycleID, zone, &actual, ResultAborted, e.takeStopReason("drain stopped"), "")
+		return
+	}
 	e.finish(cycleID, zone, &actual, ResultComplete, "", "")
 }
 
+// takeStopReason returns the Stop/StopAll reason recorded for the active
+// cycle, or fallback if the cycle ended for another reason.
+func (e *Engine) takeStopReason(fallback string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.stopReason != "" {
+		return e.stopReason
+	}
+	return fallback
+}
+
+// canDrain reports whether an abort-drain makes sense: the valve must still
+// be open (nothing else closed it) and safety must allow it to be open.
+func (e *Engine) canDrain(valveCh int) bool {
+	if err := e.safety.Authorize(valveCh, relay.On); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	info, err := e.mgr.GetRelay(ctx, valveCh)
+	return err == nil && info.State == relay.On
+}
+
+// drainAndClose holds the valve open for drainSeconds (interruptible by a
+// Stop/e-stop through a fresh cancel installed as the active cycle's), then
+// closes it. Reports whether the wait was cut short, and the valve-off
+// error, if any.
+func (e *Engine) drainAndClose(parent context.Context, zone *storage.Zone, valveCh, drainSeconds int) (interrupted bool, err error) {
+	if drainSeconds > 0 {
+		e.setState(StateDraining)
+		drainCtx, cancel := context.WithCancel(parent)
+		e.mu.Lock()
+		e.cancelRun = cancel
+		e.mu.Unlock()
+		interrupted = e.holdValveOpen(drainCtx, zone, valveCh, time.Duration(drainSeconds)*time.Second)
+		cancel()
+	}
+	e.setState(StateClosingValve)
+	return interrupted, e.relayOff(valveCh, "irrigation cycle complete")
+}
+
+// holdValveOpen waits out the drain window. It ends early (returning true)
+// on cancellation, or when the valve reads off — all-off, a relay timeout,
+// or a manual command closed it, and "draining" with a shut valve is a lie
+// that would also block the queue (audit 2026-11-10, 2.6).
+func (e *Engine) holdValveOpen(ctx context.Context, zone *storage.Zone, valveCh int, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-timer.C:
+			return false
+		case <-tick.C:
+			info, err := e.mgr.GetRelay(ctx, valveCh)
+			if err != nil || info.State == relay.On {
+				continue
+			}
+			e.mu.Lock()
+			if e.stopReason == "" {
+				e.stopReason = "valve closed during drain-back"
+			}
+			e.mu.Unlock()
+			e.events.Warn("irrigation_drain_cut_short",
+				fmt.Sprintf("zone %s valve closed during drain-back — tray may hold water — use Drain", zone.ZoneKey),
+				"system", map[string]any{"zone": zone.ZoneKey})
+			return true
+		}
+	}
+}
+
 // flood waits out the flood duration while watching for aborts, safety
-// lockouts/e-stop, and the optional moisture target.
-func (e *Engine) flood(ctx context.Context, zone *storage.Zone, zcfg ZoneConfig, d time.Duration) error {
+// lockouts/e-stop, the optional moisture target, and — about once a second —
+// the valve and pump relays themselves: a manual command or a timeout that
+// closes the valve under a running pump dead-heads it against the manifold,
+// and a pump that reads off is not flooding (audit 2026-11-10, 2.4).
+func (e *Engine) flood(ctx context.Context, zone *storage.Zone, valveCh int, zcfg ZoneConfig, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
+	lastRelayCheck := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -456,6 +619,12 @@ func (e *Engine) flood(ctx context.Context, zone *storage.Zone, zcfg ZoneConfig,
 		case <-tick.C:
 			if err := e.safety.Authorize(devices.PumpChannel, relay.On); err != nil {
 				return fmt.Errorf("safety abort: %w", err)
+			}
+			if time.Since(lastRelayCheck) >= time.Second {
+				lastRelayCheck = time.Now()
+				if err := e.checkFloodRelays(ctx, valveCh); err != nil {
+					return err
+				}
 			}
 			if zcfg.TargetMoisture != nil && zone.SoilSensorKey != nil {
 				if v := e.latestValue(*zone.SoilSensorKey); v != nil && *v >= *zcfg.TargetMoisture {
@@ -470,11 +639,20 @@ func (e *Engine) flood(ctx context.Context, zone *storage.Zone, zcfg ZoneConfig,
 	}
 }
 
-func (e *Engine) waitInterruptible(ctx context.Context, d time.Duration) {
-	select {
-	case <-ctx.Done():
-	case <-time.After(d):
+// checkFloodRelays aborts the flood if the valve or pump no longer reads on.
+// A read error is not an abort: the supervisor owns the unreachable-board
+// case and the relays hold their last state.
+func (e *Engine) checkFloodRelays(ctx context.Context, valveCh int) error {
+	for _, ch := range []int{valveCh, devices.PumpChannel} {
+		info, err := e.mgr.GetRelay(ctx, ch)
+		if err != nil {
+			return nil
+		}
+		if info.State != relay.On {
+			return fmt.Errorf("relay %d (%s) read %s during flood", ch, devices.DefaultAssignments[ch], info.State)
+		}
 	}
+	return nil
 }
 
 // precheck implements spec §9.3. The safety supervisor covers e-stop, global

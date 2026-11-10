@@ -7,8 +7,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"propagation-controller/internal/devices"
 	"propagation-controller/internal/devices/relay"
 )
+
+// maxManualPumpSeconds bounds a raw pump-on from the relay endpoint. Manual
+// pump runs happen through the irrigation engine, which opens a valve first;
+// this path exists for bench checks, where a minute is plenty.
+const maxManualPumpSeconds = 60
+
+// wateringChannels are the relays the irrigation engine drives: the three
+// shelf valves, the spare reserved for a fourth, and the pump. Raw commands
+// on them are refused while a cycle is active so nobody closes a valve
+// under a running pump (audit 2026-11-10, 2.4). Lights and fans are always
+// free; "off" on any channel is always allowed.
+var wateringChannels = map[int]bool{1: true, 2: true, 3: true, 5: true, devices.PumpChannel: true}
 
 var allowedActors = map[string]bool{
 	"api":          true,
@@ -77,6 +90,23 @@ func (s *Server) handleSetRelay(w http.ResponseWriter, r *http.Request) {
 	if !allowedActors[actor] {
 		writeError(w, http.StatusBadRequest, "actor must be api, manual_web, or manual_touch")
 		return
+	}
+	if state == relay.On {
+		if channel == devices.PumpChannel &&
+			(req.TimeoutSeconds < 1 || req.TimeoutSeconds > maxManualPumpSeconds) {
+			// Never pump against a closed manifold with only the 31-minute
+			// backstop to end it.
+			writeError(w, http.StatusBadRequest,
+				"pump-on requires timeout_seconds between 1 and 60; use the zone run endpoint for watering")
+			return
+		}
+		if wateringChannels[channel] {
+			if active := s.irrigation.Status().Active; active != nil {
+				writeError(w, http.StatusConflict,
+					"irrigation cycle active on "+active.ZoneKey+" — stop it before commanding valves or the pump directly")
+				return
+			}
+		}
 	}
 
 	// The safety supervisor gates every relay-on command (spec §12); off is

@@ -11,12 +11,29 @@ const SC2 = {
   Healthy:'var(--rk2-accent)', Monitoring:'var(--ochre-l)', Watering:'var(--river-l)',
   Draining:'var(--river-l)', // live-edit (ebb-flow)
   Dry:'var(--ochre-l)', 'Sensor Fault':'var(--oxblood-l)', Inactive:'var(--sfaint)',
-  Maintenance:'var(--ochre-l)', Disabled:'var(--sfaint)' // change 2
+  Maintenance:'var(--ochre-l)', Disabled:'var(--sfaint)', // change 2
+  'Locked Out':'var(--oxblood-l)' // audit 3.11
 };
 const RS2 = {
   Operational:'var(--rk2-accent)', Watering:'var(--river-l)', Draining:'var(--river-l)', // live-edit (ebb-flow)
-  Fault:'var(--oxblood-l)', Maintenance:'var(--ochre-l)'
+  Fault:'var(--oxblood-l)', Maintenance:'var(--ochre-l)', 'Locked Out':'var(--oxblood-l)' // audit 3.11
 };
+
+// Audit 3.2: the engine's cycle phase, in the panel's own words.
+const CYCLE_LABEL = {
+  precheck:'Prechecks', opening_valve:'Opening valve', starting_pump:'Starting pump',
+  flooding:'Pump active · valve open', stopping_pump:'Stopping pump',
+  draining:'Draining · valve open · pump off', closing_valve:'Closing valve',
+};
+function cycleLabel(cycle, fallback){
+  if(!cycle) return fallback;
+  const txt = CYCLE_LABEL[cycle.state] || cycle.state || fallback;
+  return cycle.duration ? `${txt} · ${cycle.duration} s` : txt;
+}
+const fmtUntil = (iso)=>{ const d=new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+// Audit 3.11: no target band without a moisture rule.
+const targetText = (s)=> s.hasRule===false ? 'Target · not set' : `Target · ${s.lo}–${s.hi}`;
+const tempText = (s)=> s.temp>0 ? `${s.temp}°F` : '—';
 
 // flat dial — 270° sweep, engraved ticks, target band. Two readouts:
 // needle (home plates) or marker + center-readout (shelf detail). The refined
@@ -58,7 +75,7 @@ function Plate({ s, onOpen }){
     <div className="rk2-plate vacant">
       <div className="ph">Shelf · {s.n}</div>
       <div className="nm" style={{color:'var(--sfaint)'}}>Vacant Bay</div>
-      <div className="dial"><DialGauge value={0} lo={s.lo} hi={s.hi} accent={col} size={82} active={false}/></div>
+      <div className="dial"><DialGauge value={0} lo={s.lo} hi={s.hi} accent={col} size={100} active={false}/></div>
       <div className="rd noprobe" style={{color:'var(--sfaint)'}}>standby</div>
       <div className="tp">No specimen</div>
       <div className="tag" style={{color:'var(--sfaint)'}}><span className="d"></span>Vacant</div>
@@ -67,14 +84,15 @@ function Plate({ s, onOpen }){
   return (
     <div className="rk2-plate" onClick={()=>onOpen(s)}>
       <div className="ph">Shelf · {s.n}</div>
-      <div className="nm">{s.species}</div>
-      <div className="dial"><DialGauge value={s.moisture} lo={s.lo} hi={s.hi} accent={col} size={82} active={s.moisture>0}/></div>
-      {s.moisture>0
+      {/* audit 3.12: long names clamp to two lines inside the centred box */}
+      <div className={'nm'+((s.species||'').length>22?' long':'')}><span className="clamp">{s.species}</span></div>
+      <div className="dial"><DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={100} active={s.probe}/></div>
+      {s.probe
         ? <div className="rd">{s.moisture} <small>%VWC</small></div>
         : <div className="rd noprobe">no probe</div>}
       {/* .tp is nowrap — with an EC reading the labelled form clips, so the
           probed shelf gets the compact "69°F · EC 1131" form instead. */}
-      <div className="tp">Target · {s.lo}–{s.hi}<br/>{s.ec!=null ? `${s.temp}°F · EC ${s.ec}` : `Root Zone · ${s.temp}°F`}</div>
+      <div className="tp">{targetText(s)}<br/>{s.ec!=null ? `${tempText(s)} · EC ${s.ec}` : `Root Zone · ${tempText(s)}`}</div>
       <div className="tag" style={{color:col}}><span className="d"></span>{s.status}</div>
     </div>
   );
@@ -103,10 +121,10 @@ function Ledger({ shelves, onOpen }){
               <div style={{width:'100%'}}>
                 <div className="rk2-mini"><i style={{width:s.moisture+'%',background:inBand?col:'var(--ochre-l)'}}></i>
                   <span className="tg" style={{left:s.lo+'%'}}></span><span className="tg" style={{left:s.hi+'%'}}></span></div>
-                <div style={{fontSize:9,letterSpacing:'0.06em',color:'var(--sdim)',marginTop:5}}>{s.moisture>0 ? s.moisture+'%' : 'no probe'} · {s.lo}–{s.hi}</div>
+                <div style={{fontSize:9,letterSpacing:'0.06em',color:'var(--sdim)',marginTop:5}}>{s.probe ? s.moisture+'%' : 'no probe'} · {s.hasRule===false ? 'not set' : `${s.lo}–${s.hi}`}</div>
               </div>
             </div>
-            <div style={{fontSize:12,color:'var(--sink)'}}>{s.temp}°F</div>
+            <div style={{fontSize:12,color:'var(--sink)'}}>{tempText(s)}</div>
             <div><span className="rk2-tag2" style={{color:col}}><span className="d"></span>{s.status}</span></div>
           </div>
         );
@@ -115,15 +133,18 @@ function Ledger({ shelves, onOpen }){
   );
 }
 
-function Detail2({ s, onBack, onWater, watering, theme, onLight, onFan, maintenance, onSetMaintenance, onSetEnabled }){
+function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pending=false, theme, onLight, onFan, maintenance, onSetMaintenance, onSetEnabled, connection='online', lastSync='—' }){
   const col = watering ? 'var(--river-l)' : (SC2[s.status] || 'var(--sfaint)');
   const label = watering ? 'Watering' : s.status;
   const sev = watering ? PG.STATUS['Watering'].sev : (PG.STATUS[s.status] || PG.STATUS.Inactive).sev;
   // change 2: a disabled shelf can't be watered (engine rejects it); a manual
   // water while maintenance is on asks first.
   const disabled = !s.active;
+  // Audit 3.6: offline → every control is inert and says so.
+  const offline = connection==='offline';
   const [confirmWater, setConfirmWater] = React.useState(false);
-  const tapWater = ()=>{ if(maintenance){ setConfirmWater(true); } else { onWater && onWater(); } };
+  const tapWater = ()=>{ if(offline||pending) return; if(maintenance){ setConfirmWater(true); } else { onWater && onWater(); } };
+  const guard = (fn)=>(...a)=>{ if(offline) return; fn && fn(...a); };
   const tN = (s.temp-60)/30*100;
   // marker-dot ring colour blends into the panel so the dot reads as "on top".
   const dbg = theme==='light' ? '#E7DFCA' : '#243029';
@@ -139,7 +160,7 @@ function Detail2({ s, onBack, onWater, watering, theme, onLight, onFan, maintena
       <span className="rk2-corner bl"></span><span className="rk2-corner br"></span>
       <div className="rk2-dinner">
         <div className="rk2-dtop">
-          <button className="rk2-plaque" onClick={()=>{ if(!watering) onBack(); }}>‹ Return</button>
+          <button className="rk2-plaque" onClick={onBack}>‹ Return</button>
           <span className="rk2-plaque" style={{color:col,borderColor:col}}><span style={{width:6,height:6,background:col,transform:'rotate(45deg)',display:'inline-block'}}></span>{label} · {sev}</span>
         </div>
         <div className="rk2-dname">
@@ -152,10 +173,10 @@ function Detail2({ s, onBack, onWater, watering, theme, onLight, onFan, maintena
           <div className="rk2-dcell">
             <div className="k">Soil Moisture</div>
             <div className="rk2-dwrap">
-              <DialGauge value={s.moisture} lo={s.lo} hi={s.hi} accent={col} size={90} marker active={s.moisture>0} bg={dbg}/>
-              <div className="rk2-readout">{s.moisture>0 ? <React.Fragment><b>{s.moisture}</b><small>%VWC</small></React.Fragment> : <b className="np">—</b>}</div>
+              <DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={90} marker active={s.probe} bg={dbg}/>
+              <div className="rk2-readout">{s.probe ? <React.Fragment><b>{s.moisture}</b><small>%VWC</small></React.Fragment> : <b className="np">—</b>}</div>
             </div>
-            <div className="rk2-dtgt">Target · <b>{s.lo}–{s.hi}%</b></div>
+            <div className="rk2-dtgt">{s.hasRule===false ? <span className="np">Target · not set</span> : <React.Fragment>Target · <b>{s.lo}–{s.hi}%</b></React.Fragment>}</div>
           </div>
           <div className="rk2-dcell">
             <div className="k">Root Zone Temp</div>
@@ -180,36 +201,52 @@ function Detail2({ s, onBack, onWater, watering, theme, onLight, onFan, maintena
         </div>
         <div className="rk2-controls2">
           <div className="rk2-light">
-            <div className="ll"><span className="k">Lighting · Rack</span><span className="ph">{s.on} – {s.off}</span></div>
+            {/* audit 3.10: a manual override is visible wherever lights are toggled */}
+            <div className="ll"><span className="k">Lighting · Rack{s.lightOverride ? ' · manual' : ''}</span><span className="ph">{s.lightOverride ? `Forced ${s.lightOverride.mode}${s.lightOverride.until ? ' until '+fmtUntil(s.lightOverride.until) : ''}` : `${s.on} – ${s.off}`}</span></div>
             <div className="rk2-seg">
-              <button className={lightOn?'on':''} onClick={()=>onLight && onLight(true)}>On</button>
-              <button className={!lightOn?'on':''} onClick={()=>onLight && onLight(false)}>Off</button>
+              <button className={lightOn?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(true))}>On</button>
+              <button className={!lightOn?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(false))}>Off</button>
             </div>
           </div>
           <div className="rk2-light">
             <div className="ll"><span className="k">Fans · Rack</span><span className="ph">Circulation</span></div>
             <div className="rk2-seg">
-              <button className={fanOn?'on':''} onClick={()=>onFan && onFan(true)}>On</button>
-              <button className={!fanOn?'on':''} onClick={()=>onFan && onFan(false)}>Off</button>
+              <button className={fanOn?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(true))}>On</button>
+              <button className={!fanOn?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(false))}>Off</button>
             </div>
           </div>
         </div>
         <div className="rk2-water">
-          {watering ? (
-            <div className="rk2-pump"><div className="tk"></div><div className="fill"></div><span className="lbl">Pump active · valve open · 45 s cycle</span></div>
+          {offline ? (
+            // audit 3.6: the detail screen says it is offline instead of looking live
+            <div className="rk2-plaque rk2-offline" style={{justifyContent:'center',width:'100%'}}>Controller offline — last reading {lastSync}</div>
+          ) : busy ? (
+            // audit 3.2/3.3/3.4: the zone is Watering/Draining — real phase text
+            // from the engine, and Stop is the only irrigation control offered.
+            <div className="rk2-wrow busy">
+              <div className="rk2-pump"><div className="tk"></div><span className="lbl">{cycleLabel(s.cycle, s.status==='Draining' ? 'Draining' : 'Cycle running')}</span></div>
+              <button className="rk2-wbtn rk2-dbtn rk2-stop" disabled={pending} onClick={()=>onStop && onStop()} title="Stop this cycle: pump off, valve closed">Stop</button>
+            </div>
+          ) : watering ? (
+            <div className="rk2-pump"><div className="tk"></div><span className="lbl">{cycleLabel(s.cycle, 'Cycle accepted · starting')}</span></div>
           ) : disabled ? (
             <div className="rk2-plaque" style={{justifyContent:'center',width:'100%',color:'var(--sfaint)'}}>Shelf disabled — enable to water</div>
           ) : (
-            <button className="rk2-wbtn" onClick={tapWater}><span className="d"></span>Water Now<span className="d"></span></button>
+            <div className="rk2-wrow">
+              <button className="rk2-wbtn" disabled={pending} onClick={tapWater}><span className="d"></span>{pending ? 'Sending…' : 'Water Now'}<span className="d"></span></button>
+              {/* Drain (Austin, 2026-11-10): valve open for the drain-back time, pump locked off —
+                  for a tray left full by an interrupted cycle. */}
+              <button className="rk2-wbtn rk2-dbtn" disabled={pending} onClick={()=>{ if(!pending && onDrain) onDrain(); }} title="Open valve, pump off, drain back to reservoir">Drain</button>
+            </div>
           )}
           {/* change 2: per-shelf disable toggle + system maintenance toggle */}
           <div className="rk2-actions">
-            <button className="rk2-plaque" style={{justifyContent:'center'}}
-              onClick={()=>onSetEnabled && onSetEnabled(s.n, disabled)}>
+            <button className="rk2-plaque" style={{justifyContent:'center'}} disabled={offline}
+              onClick={guard(()=>onSetEnabled && onSetEnabled(s.n, disabled))}>
               {disabled ? 'Enable Shelf' : 'Disable Shelf'}
             </button>
-            <button className="rk2-plaque" style={{justifyContent:'center',...(maintenance?{color:'var(--ochre-l)',borderColor:'var(--ochre-l)'}:{})}}
-              onClick={()=>onSetMaintenance && onSetMaintenance(!maintenance)}>
+            <button className="rk2-plaque" style={{justifyContent:'center',...(maintenance?{color:'var(--ochre-l)',borderColor:'var(--ochre-l)'}:{})}} disabled={offline}
+              onClick={guard(()=>onSetMaintenance && onSetMaintenance(!maintenance))}>
               {maintenance ? 'Exit Maintenance' : 'Maintenance'}
             </button>
           </div>
@@ -234,16 +271,44 @@ function Detail2({ s, onBack, onWater, watering, theme, onLight, onFan, maintena
   );
 }
 
-function RackDisplay2({ shelves, reservoir, rackStatus, layout, clock, day, onWater, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled }){
+function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onStop, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
   const [watering, setWatering] = React.useState(false);
-  const active = shelves.filter(s=>s.active);
+  const [pending, setPending] = React.useState(false);
+  const pendingRef = React.useRef(false);
   const statusCol = RS2[rackStatus] || RS2.Operational;
   const current = open ? shelves.find(s=>s.n===open.n) : null;
-  // Live cycle state wins over the local animation: the lamp keeps pulsing
-  // until the backend reports the cycle closed (handoff §8).
-  const isWatering = watering || (current && current.status==='Watering');
-  const doWater = ()=>{ if(isWatering) return; setWatering(true); onWater && onWater(current); setTimeout(()=>setWatering(false), 3200); };
+  // Audit 3.4: the zone is busy for the whole cycle, fill and drain-back
+  // alike — Water Now and Drain both hide, Stop is offered instead.
+  const busy = !!(current && (current.status==='Watering' || current.status==='Draining'));
+  // Audit 3.2: `watering` is only set once the backend accepted the command,
+  // and clears as soon as the engine reports the zone busy (or after a short
+  // grace period if it never does — e.g. the cycle was queued).
+  React.useEffect(()=>{
+    if(!watering) return;
+    if(busy){ setWatering(false); return; }
+    const t = setTimeout(()=>setWatering(false), 5000);
+    return ()=>clearTimeout(t);
+  }, [watering, busy]);
+  React.useEffect(()=>{ if(!current) setWatering(false); }, [current]);
+  // One in-flight irrigation command at a time; the button that fired stays
+  // inert until its promise settles (success or rejection).
+  const fire = (fn, shelf, onOk)=>{
+    if(pendingRef.current || !fn || !shelf) return;
+    pendingRef.current = true; setPending(true);
+    Promise.resolve(fn(shelf))
+      .then((ok)=>{ if(ok && onOk) onOk(); })
+      .catch(()=>{})
+      .then(()=>{ pendingRef.current = false; setPending(false); });
+  };
+  const doWater = ()=>{ if(busy) return; fire(onWater, current, ()=>setWatering(true)); };
+  const doDrain = ()=>{ if(busy) return; fire(onDrain, current); };
+  const doStop = ()=>{ fire(onStop, current, ()=>setWatering(false)); };
+  // Audit 3.7/3.11: one status line carries offline / lockouts / maintenance,
+  // so no extra banner competes with the three plates for height.
+  const statusText = connection==='offline' ? 'Controller Offline'
+    : rackStatus==='Locked Out' ? 'System Locked Out' + (lockouts.length ? ' · ' + lockouts.join(', ').replace(/_/g,' ') : '')
+    : 'System ' + rackStatus + (maintenance && rackStatus!=='Maintenance' ? ' · maintenance' : '');
 
   return (
     <div className={"rk2-screen"+(theme==='light'?' light':'')}>
@@ -268,14 +333,14 @@ function RackDisplay2({ shelves, reservoir, rackStatus, layout, clock, day, onWa
         <div className="rk2-div"><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
         <div className="rk2-sub">
           <span className="date">Day · <b>{day || '06 / 21 / 26'}</b></span>
-          <span className="rk2-status" style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{connection==='offline'?'Controller Offline':'System '+rackStatus}</span>
+          <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{statusText}</span>
           <span className="time">Time · <b>{clock}</b></span>
         </div>
 
-        {/* change 2: maintenance banner strip (both surfaces) */}
-        {maintenance && (
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,margin:'0 0 8px',padding:'6px 10px',border:'1px solid var(--ochre-l)',borderRadius:6,background:'rgba(181,138,60,0.12)',color:'var(--ochre-l)',fontFamily:'"JetBrains Mono",monospace',fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase'}}>
-            <span style={{width:8,height:8,borderRadius:'50%',background:'var(--ochre-l)'}}></span>Maintenance · automation suspended · lighting on
+        {/* audit 3.1: the last rejected command, over the status row */}
+        {toast && (
+          <div className="rk2-toast" onClick={onDismissToast} role="status">
+            <span className="d"></span>{toast.text}
           </div>
         )}
 
@@ -287,13 +352,20 @@ function RackDisplay2({ shelves, reservoir, rackStatus, layout, clock, day, onWa
 
         <div className="rk2-resv">
           <div className="lab"><span className="ln"></span>Reservoir · 26.5 L Tank<span className="ln"></span></div>
-          <div className="rk2-measure"><i style={{width:reservoir+'%'}}></i><div className="tk"></div></div>
-          <div className="pct"><b>{reservoir}%</b> · ≈ {PG.tankLiters(reservoir)} L on hand · ≈ {PG.tankDays(reservoir)} days</div>
+          <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div></div>
+          {/* audit 3.9: a stale level probe reads "— %" / "sensor offline"; liters and days are estimates */}
+          {reservoirOnline
+            ? <div className="pct"><b>{reservoir}%</b> · est. {PG.tankLiters(reservoir)} L on hand · est. {PG.tankDays(reservoir)} days</div>
+            : <div className="pct"><b>— %</b> · level sensor offline</div>}
         </div>
       </div>
 
-      {current && <Detail2 s={current} watering={isWatering} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onLight={onLight} onFan={onFan}
-        maintenance={maintenance} onSetMaintenance={onSetMaintenance} onSetEnabled={onSetEnabled}/>}
+      {current && <Detail2 s={current} watering={watering} busy={busy} pending={pending} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onDrain={doDrain} onStop={doStop} onLight={onLight} onFan={onFan}
+        maintenance={maintenance} onSetMaintenance={onSetMaintenance} onSetEnabled={onSetEnabled} connection={connection} lastSync={lastSync}/>}
+      {/* the toast also shows over the detail screen */}
+      {current && toast && (
+        <div className="rk2-toast over" onClick={onDismissToast} role="status"><span className="d"></span>{toast.text}</div>
+      )}
       {locked && <LockScreen clock={clock} onUnlock={onUnlock}/>}
     </div>
   );

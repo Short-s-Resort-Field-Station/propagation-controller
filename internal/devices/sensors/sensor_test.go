@@ -49,7 +49,7 @@ func TestReadAllAppliesScaleOffsetAndKeys(t *testing.T) {
 	bus.Open(context.Background())
 
 	cfg := Config{
-		ModbusAddress:       1,
+		ModbusAddress:       11,
 		PollIntervalSeconds: 10,
 		Registers: []RegisterSpec{
 			{Name: "moisture", Register: 0, DataType: "uint16", Scale: 0.1, Unit: "%"},
@@ -85,7 +85,7 @@ func TestReadAllMarksClippedReadings(t *testing.T) {
 
 	clip := 800.0 // below the mock EC range (900..1450) so every read clips
 	cfg := Config{
-		ModbusAddress:       1,
+		ModbusAddress:       11,
 		PollIntervalSeconds: 10,
 		Registers: []RegisterSpec{
 			{Name: "ec", Register: 2, DataType: "uint16", Scale: 1, Unit: "µS/cm", ClipAt: &clip},
@@ -115,7 +115,7 @@ func TestReadAllUnknownSlaveFails(t *testing.T) {
 
 func TestConfigValidate(t *testing.T) {
 	good := Config{
-		ModbusAddress:       1,
+		ModbusAddress:       11,
 		PollIntervalSeconds: 10,
 		Registers:           []RegisterSpec{{Name: "m", Register: 0, DataType: "uint16", Unit: "%"}},
 	}

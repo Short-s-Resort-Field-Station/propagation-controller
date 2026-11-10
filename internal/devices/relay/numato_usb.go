@@ -30,9 +30,19 @@ type NumatoUSB struct {
 	port   io.ReadWriteCloser
 	openFn func(name string) (io.ReadWriteCloser, error)
 	health Health
+	// wantOpen is set by Open and cleared by Close. While set, a port lost
+	// to an I/O error is reopened on the next command, at most once per
+	// numatoReopenBackoff — the board holds its relays on external 12 V, so
+	// a pump left on behind a dead USB link must become reachable again
+	// without a daemon restart (audit 2026-11-10, 2.2b).
+	wantOpen   bool
+	nextReopen time.Time
 }
 
-const numatoCommandTimeout = 2 * time.Second
+const (
+	numatoCommandTimeout = 2 * time.Second
+	numatoReopenBackoff  = 2 * time.Second
+)
 
 func NewNumatoUSB(portName string) *NumatoUSB {
 	return &NumatoUSB{
@@ -77,24 +87,22 @@ func DetectNumatoPort() (string, error) {
 func (n *NumatoUSB) Open(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	// Even if this first open fails, later commands keep retrying on the
+	// backoff: a board plugged in after boot comes online by itself.
+	n.wantOpen = true
 	if n.port != nil {
 		return nil
 	}
-	port, err := n.openFn(n.portName)
-	if err != nil {
-		n.recordError(err)
-		return fmt.Errorf("open relay serial port %s: %w", n.portName, err)
+	if err := n.openLocked(); err != nil {
+		return err
 	}
-	n.port = port
-	n.health.Status = "online"
-	n.health.LastSeen = time.Now()
 
 	// Identification is best-effort; a module that answers commands but not
-	// "ver" should not be treated as broken.
-	if ver, err := n.execLocked(ctx, "ver"); err == nil && ver != "" {
+	// "ver" should not be treated as broken (and must not drop the port).
+	if ver, err := n.execRawLocked(ctx, "ver"); err == nil && ver != "" {
 		n.health.Info["firmware_version"] = ver
 	}
-	if id, err := n.execLocked(ctx, "id get"); err == nil && id != "" {
+	if id, err := n.execRawLocked(ctx, "id get"); err == nil && id != "" {
 		n.health.Info["module_id"] = id
 	}
 	return nil
@@ -103,6 +111,7 @@ func (n *NumatoUSB) Open(ctx context.Context) error {
 func (n *NumatoUSB) Close() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	n.wantOpen = false
 	if n.port == nil {
 		return nil
 	}
@@ -110,6 +119,52 @@ func (n *NumatoUSB) Close() error {
 	n.port = nil
 	n.health.Status = "offline"
 	return err
+}
+
+// openLocked opens the serial port and marks the driver online. Caller must
+// hold n.mu.
+func (n *NumatoUSB) openLocked() error {
+	n.nextReopen = time.Now().Add(numatoReopenBackoff)
+	port, err := n.openFn(n.portName)
+	if err != nil {
+		n.recordError(err)
+		return fmt.Errorf("open relay serial port %s: %w", n.portName, err)
+	}
+	n.port = port
+	n.health.Status = "online"
+	n.health.LastSeen = time.Now()
+	return nil
+}
+
+// ensureOpenLocked reopens a port that was dropped after an I/O error, no
+// more often than the backoff. Caller must hold n.mu.
+func (n *NumatoUSB) ensureOpenLocked() error {
+	if n.port != nil {
+		return nil
+	}
+	if !n.wantOpen {
+		return errors.New("relay serial port not open")
+	}
+	if wait := time.Until(n.nextReopen); wait > 0 {
+		return fmt.Errorf("relay serial port closed after I/O error (%s); retrying in %s",
+			n.health.LastError, wait.Round(100*time.Millisecond))
+	}
+	if err := n.openLocked(); err != nil {
+		return err
+	}
+	n.health.Info["reopened_at"] = time.Now().UTC().Format(time.RFC3339)
+	return nil
+}
+
+// dropPortLocked closes a port after an I/O error so the next command can
+// try a fresh open. Caller must hold n.mu.
+func (n *NumatoUSB) dropPortLocked(err error) {
+	n.recordError(err)
+	if n.port != nil {
+		n.port.Close()
+		n.port = nil
+	}
+	n.nextReopen = time.Now().Add(numatoReopenBackoff)
 }
 
 func (n *NumatoUSB) SetChannel(ctx context.Context, channel int, state State) error {
@@ -184,15 +239,37 @@ func (n *NumatoUSB) Health(ctx context.Context) Health {
 	return h
 }
 
+// errPortIO marks a failure of the port itself (write, read, or no prompt
+// within the timeout) as opposed to a caller cancellation.
+type errPortIO struct{ err error }
+
+func (e errPortIO) Error() string { return e.err.Error() }
+func (e errPortIO) Unwrap() error { return e.err }
+
 // execLocked sends one command and returns the response with the echo and
-// prompt stripped. Caller must hold n.mu.
+// prompt stripped, reopening a dropped port first and dropping it again on
+// an I/O failure. Caller must hold n.mu.
 func (n *NumatoUSB) execLocked(ctx context.Context, cmd string) (string, error) {
+	if err := n.ensureOpenLocked(); err != nil {
+		return "", err
+	}
+	resp, err := n.execRawLocked(ctx, cmd)
+	var ioErr errPortIO
+	if errors.As(err, &ioErr) {
+		n.dropPortLocked(ioErr.err)
+	}
+	return resp, err
+}
+
+// execRawLocked is execLocked without the reopen/drop handling. Caller must
+// hold n.mu and have an open port.
+func (n *NumatoUSB) execRawLocked(ctx context.Context, cmd string) (string, error) {
 	if n.port == nil {
 		return "", errors.New("relay serial port not open")
 	}
 	if _, err := n.port.Write([]byte(cmd + "\r")); err != nil {
 		n.recordError(err)
-		return "", fmt.Errorf("write %q: %w", cmd, err)
+		return "", errPortIO{fmt.Errorf("write %q: %w", cmd, err)}
 	}
 
 	deadline := time.Now().Add(numatoCommandTimeout)
@@ -208,7 +285,7 @@ func (n *NumatoUSB) execLocked(ctx context.Context, cmd string) (string, error) 
 		nRead, err := n.port.Read(chunk)
 		if err != nil && !errors.Is(err, io.EOF) {
 			n.recordError(err)
-			return "", fmt.Errorf("read response to %q: %w", cmd, err)
+			return "", errPortIO{fmt.Errorf("read response to %q: %w", cmd, err)}
 		}
 		if nRead > 0 {
 			buf.Write(chunk[:nRead])
@@ -219,7 +296,7 @@ func (n *NumatoUSB) execLocked(ctx context.Context, cmd string) (string, error) 
 		if time.Now().After(deadline) {
 			err := fmt.Errorf("timeout waiting for response to %q", cmd)
 			n.recordError(err)
-			return "", err
+			return "", errPortIO{err}
 		}
 	}
 

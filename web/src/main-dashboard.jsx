@@ -6,7 +6,8 @@ import { PG } from './design/data.jsx';
 import { Dashboard } from './design/dashboard.jsx';
 import { useUnitState } from './live/useUnitState.js';
 import { getEnvSeries } from './live/series.js';
-import { api } from './live/api.js';
+import { api, onUnauthorized } from './live/api.js';
+import { LIGHT_OVERRIDE_MIN } from './live/useUnitState.js';
 import { LiveSignInModal, SetupModal, OperatorsModal, toDesignSession } from './live/auth-ui.jsx';
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -21,7 +22,10 @@ function makeControls(state, actions) {
   return {
     list,
     lightOn: state.shelves.length ? state.shelves[0].light : false,
-    manualLight: (on) => actions.lights(on),
+    // audit 3.10: the dashboard toggle is a timed override; Auto clears it.
+    lightOverride: state.lightOverride,
+    manualLight: (on) => actions.lights(on, { expiresMinutes: LIGHT_OVERRIDE_MIN }),
+    clearLight: () => actions.lights('auto'),
     load: async (n) => {
       const zoneKey = zoneFor(n);
       const [mc, sch] = await Promise.all([
@@ -74,11 +78,19 @@ function App() {
   const [setupRequired, setSetupRequired] = React.useState(false);
   const [showOperators, setShowOperators] = React.useState(false);
   const [acked, setAcked] = React.useState({});
+  const [signInRequest, setSignInRequest] = React.useState(0);
 
   React.useEffect(() => {
     api.session()
       .then((r) => { setSession(toDesignSession(r.user)); setSetupRequired(r.setup_required); })
       .catch(() => setSession(null));
+    // audit 3.10/3.11: any 401 (expired cookie, revoked account) clears the
+    // session and reopens sign-in; the toast carries the backend's message.
+    onUnauthorized(() => {
+      setSession((s) => (s ? null : s));
+      setSignInRequest((n) => n + 1);
+    });
+    return () => onUnauthorized(null);
   }, []);
 
   const signOut = () => { api.logout().catch(() => {}); setSession(null); };
@@ -89,7 +101,12 @@ function App() {
     openOperators: () => setShowOperators(true),
   }), [canManage]);
 
-  const alerts = PG.deriveAlerts(state.shelves, state.reservoir, state.clock)
+  // audit 3.9: no "Reservoir Low" from a stale probe — a sensor-offline alert instead.
+  const alerts = PG.deriveAlerts(state.shelves, state.reservoirOnline ? state.reservoir : 100, state.clock)
+    .concat(state.ready && !state.reservoirOnline
+      ? [{ id: 'RESOFF', ts: state.clock, shelf: '—', kind: 'Sensor Fault', sev: 'var(--oxblood)',
+          prio: 'ACTION REQUIRED', msg: 'Reservoir level sensor not reporting — refill guard is blind.' }]
+      : [])
     .filter((a) => !acked[a.id]);
 
   const getSeries = React.useCallback(
@@ -98,7 +115,7 @@ function App() {
   );
   const controls = React.useMemo(
     () => makeControls(state, actions),
-    [state.shelves, actions],
+    [state.shelves, state.lightOverride, actions],
   );
   // change 3: species-profiles bridge for the assign/edit modal.
   const profiles = React.useMemo(() => ({
@@ -129,7 +146,16 @@ function App() {
       <Dashboard
         shelves={state.shelves}
         reservoir={state.reservoir}
+        reservoirOnline={state.reservoirOnline}
         rackStatus={state.rackStatus}
+        lockouts={state.lockouts}
+        lastSync={state.lastSync}
+        toast={state.toast}
+        onDismissToast={actions.dismissToast}
+        estop={state.estop}
+        onEmergencyStop={actions.emergencyStop}
+        onSafetyReset={actions.safetyReset}
+        signInRequest={signInRequest}
         log={state.log}
         session={session}
         onSignIn={setSession}

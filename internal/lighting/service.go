@@ -27,10 +27,16 @@ import (
 
 const scheduleKey = "lighting"
 
+// overrideKey is the settings row that carries a manual override across a
+// restart: with the schedule disabled and the lights on by hand, a power
+// blip must not leave the rack dark until a human notices (audit
+// 2026-11-10, 2.11). Cleared overrides are stored as JSON null.
+const overrideKey = "lighting_override"
+
 // Rule is the schedules-table rule_json payload.
 type Rule struct {
-	OnTime  string   `json:"on_time"`  // "06:00"
-	OffTime string   `json:"off_time"` // "19:30"
+	OnTime  string   `json:"on_time"`        // "06:00"
+	OffTime string   `json:"off_time"`       // "19:30"
 	Days    []string `json:"days,omitempty"` // lowercase mon..sun; empty = daily
 }
 
@@ -70,6 +76,7 @@ type Service struct {
 	mgr       *devices.Manager
 	safety    *safety.Supervisor
 	schedules *storage.ScheduleRepo
+	settings  *storage.SettingsRepo
 	events    *logging.EventLogger
 	log       zerolog.Logger
 	interval  time.Duration
@@ -80,11 +87,12 @@ type Service struct {
 }
 
 func NewService(mgr *devices.Manager, sup *safety.Supervisor, schedules *storage.ScheduleRepo,
-	events *logging.EventLogger, log zerolog.Logger, interval time.Duration) *Service {
+	settings *storage.SettingsRepo, events *logging.EventLogger, log zerolog.Logger, interval time.Duration) *Service {
 	if interval <= 0 {
 		interval = 15 * time.Second
 	}
-	return &Service{mgr: mgr, safety: sup, schedules: schedules, events: events, log: log, interval: interval}
+	return &Service{mgr: mgr, safety: sup, schedules: schedules, settings: settings,
+		events: events, log: log, interval: interval}
 }
 
 // EnsureDefault seeds the photoperiod schedule from the design handoff
@@ -103,6 +111,7 @@ func (s *Service) EnsureDefault(timezone string) error {
 }
 
 func (s *Service) Start(ctx context.Context) {
+	s.restoreOverride(ctx)
 	go func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
@@ -116,6 +125,49 @@ func (s *Service) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// restoreOverride reloads a persisted manual override and re-applies it.
+// An override whose expiry passed while the daemon was down is dropped and
+// the schedule takes over on the first tick.
+func (s *Service) restoreOverride(ctx context.Context) {
+	raw, ok, err := s.settings.Get(overrideKey)
+	if err != nil {
+		s.log.Error().Err(err).Msg("lighting: cannot read persisted override")
+		return
+	}
+	if !ok {
+		return
+	}
+	var o *Override
+	if err := json.Unmarshal([]byte(raw), &o); err != nil || o == nil {
+		return
+	}
+	if o.Mode != "on" && o.Mode != "off" {
+		return
+	}
+	if o.Until != nil && time.Now().After(*o.Until) {
+		s.persistOverride(nil)
+		s.events.Info("lighting_override_expired", "lighting override expired during downtime; returning to schedule", o.Actor, nil)
+		return
+	}
+	s.mu.Lock()
+	s.override = o
+	s.mu.Unlock()
+	s.apply(ctx, o.Mode == "on", o.Actor, "manual lighting override restored after restart")
+	s.events.Info("lighting_override_restored", fmt.Sprintf("lighting override (%s) restored after restart", o.Mode),
+		o.Actor, map[string]any{"until": o.Until})
+}
+
+// persistOverride stores the current override (nil clears it).
+func (s *Service) persistOverride(o *Override) {
+	body, err := json.Marshal(o)
+	if err == nil {
+		err = s.settings.Set(overrideKey, string(body))
+	}
+	if err != nil {
+		s.log.Error().Err(err).Msg("lighting: cannot persist override")
+	}
 }
 
 func (s *Service) tick(ctx context.Context) {
@@ -137,6 +189,7 @@ func (s *Service) tick(ctx context.Context) {
 		actor := s.override.Actor
 		s.override = nil
 		s.mu.Unlock()
+		s.persistOverride(nil)
 		s.events.Info("lighting_override_expired", "lighting override expired; returning to schedule", actor, nil)
 		s.mu.Lock()
 		if expected != nil {
@@ -186,9 +239,11 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 			t := time.Now().Add(time.Duration(expiresMinutes) * time.Minute)
 			until = &t
 		}
+		o := &Override{Mode: mode, Until: until, Actor: actor, Since: time.Now().UTC()}
 		s.mu.Lock()
-		s.override = &Override{Mode: mode, Until: until, Actor: actor, Since: time.Now().UTC()}
+		s.override = o
 		s.mu.Unlock()
+		s.persistOverride(o)
 		s.apply(ctx, mode == "on", actor, "manual lighting override")
 		s.events.Info("lighting_override", fmt.Sprintf("lighting manually forced %s", mode), actor,
 			map[string]any{"expires_minutes": expiresMinutes})
@@ -200,6 +255,7 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 		expected := s.lastExpected
 		s.mu.Unlock()
 		if had {
+			s.persistOverride(nil)
 			s.events.Info("lighting_override_cleared", "lighting override cleared; returning to schedule", actor, nil)
 		}
 		if expected != nil {

@@ -131,3 +131,16 @@ func (r *CycleRepo) LastForZone(zoneID int64) (*Cycle, error) {
 	}
 	return &c, nil
 }
+
+// AbortInterrupted marks every cycle still "running" as aborted. Called once
+// at engine start: a cycle can only be left running by a crash or power loss,
+// and the startup safe-state has already closed its valve.
+func (r *CycleRepo) AbortInterrupted(reason string) (int64, error) {
+	res, err := r.db.Exec(
+		`UPDATE irrigation_cycles SET ended_at = ?, result = 'aborted', abort_reason = ?
+		 WHERE result = 'running'`, time.Now().UTC(), reason)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

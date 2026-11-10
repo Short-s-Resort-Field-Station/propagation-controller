@@ -79,3 +79,37 @@ func (d *Decider) Step(healthy bool) Action {
 	d.restarts++
 	return ActionRestart
 }
+
+// RelayMonitor turns the health endpoint's relay_controller status into a
+// healthy/unhealthy verdict. One bad reading is a USB hiccup; Threshold
+// consecutive bad readings mean nobody can switch the pump off (the Numato
+// holds state on external 12 V), so the service must be restarted and, if
+// that fails, the port seized and the safe state forced (audit 2026-11-10,
+// 2.2a).
+type RelayMonitor struct {
+	Threshold int
+	bad       int
+}
+
+func NewRelayMonitor(threshold int) *RelayMonitor {
+	if threshold < 1 {
+		threshold = 3
+	}
+	return &RelayMonitor{Threshold: threshold}
+}
+
+// RelayHealthy reports whether a relay_controller status string counts as
+// reachable. Anything else (offline, error, "" from an old daemon) does not.
+func RelayHealthy(status string) bool {
+	return status == "online" || status == "simulated"
+}
+
+// Step consumes one status and reports whether the relay side is healthy.
+func (m *RelayMonitor) Step(status string) bool {
+	if RelayHealthy(status) {
+		m.bad = 0
+		return true
+	}
+	m.bad++
+	return m.bad < m.Threshold
+}

@@ -64,6 +64,7 @@ func mutationRole(method, path string) string {
 		strings.HasPrefix(p, "/diagnostics/"),
 		strings.HasSuffix(p, "/poll"),
 		strings.HasSuffix(p, "/run"),
+		strings.HasSuffix(p, "/drain"),
 		strings.HasSuffix(p, "/stop"),
 		p == "/safety/emergency-stop":
 		return auth.RoleOperator
@@ -126,9 +127,11 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // setupAllowedFrom: first-boot setup may only be claimed from the unit
-// itself or its local network — never through a tunnel/proxy (which always
-// adds forwarding headers) and never from a public address. This protects a
-// unit whose URL goes live before setup has been run.
+// itself (the kiosk, or SSH + curl) — never through a tunnel/proxy (which
+// always adds forwarding headers) and not from the LAN either: the unit sits
+// on an IoT subnet, and any device there could otherwise claim an unset-up
+// unit as its own (audit 2026-11-10, 1.2). The "no users yet" rule still
+// applies on top of this, in auth.Setup.
 func setupAllowedFrom(r *http.Request) bool {
 	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("Cf-Connecting-Ip") != "" {
 		return false
@@ -138,13 +141,13 @@ func setupAllowedFrom(r *http.Request) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	if !setupAllowedFrom(r) {
 		writeError(w, http.StatusForbidden,
-			"first-time setup must be run from the unit's local network")
+			"first-time setup must be run on the unit itself (rack console or localhost)")
 		return
 	}
 	var req struct{ Username, Password string }

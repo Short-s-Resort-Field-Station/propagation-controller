@@ -115,16 +115,19 @@ func (s *Service) Start(ctx context.Context) {
 }
 
 // Enabled reports the global automation switch (settings key "automation").
+// Fail safe: a missing, unreadable, or malformed value means OFF — nothing
+// waters because a PUT had a typo (audit 2026-11-10, 2.9). The dashboard's
+// automation toggle writes {"enabled": true} explicitly.
 func (s *Service) Enabled() bool {
 	raw, ok, err := s.settings.Get("automation")
 	if err != nil || !ok {
-		return true // default on
+		return false
 	}
 	var v struct {
 		Enabled *bool `json:"enabled"`
 	}
 	if json.Unmarshal([]byte(raw), &v) != nil || v.Enabled == nil {
-		return true
+		return false
 	}
 	return *v.Enabled
 }
@@ -172,6 +175,18 @@ func (s *Service) Tick() {
 	last := s.lastCheck
 	s.lastCheck = now
 	s.mu.Unlock()
+
+	// Catch-up window is capped at two ticks. A bigger gap is a clock jump
+	// (NTP sync after a cold boot with a lagging RTC) or a stall, and every
+	// schedule minute inside it is a missed run, not a backlog to water
+	// through now (§11.2; audit 2026-11-10, 2.10).
+	if limit := 2 * s.interval; now.Sub(last) > limit {
+		s.events.Warn("schedule_catchup_skipped",
+			fmt.Sprintf("clock advanced %s since the last check; schedules in that gap are skipped",
+				now.Sub(last).Round(time.Second)),
+			"system", map[string]any{"from": last.UTC(), "to": now.UTC()})
+		last = now.Add(-limit)
+	}
 
 	if !s.Enabled() {
 		return
@@ -356,7 +371,7 @@ func (s *Service) evaluateMoistureRule(rule storage.MoistureRule, now time.Time,
 		DurationSeconds: rule.RunDurationSeconds,
 		TriggerType:     "moisture_threshold",
 		TriggerSource:   rule.SensorKey,
-		Reason: fmt.Sprintf("moisture %.1f below threshold %.1f", latest.Value, rule.TriggerBelow),
+		Reason:          fmt.Sprintf("moisture %.1f below threshold %.1f", latest.Value, rule.TriggerBelow),
 	})
 	if err != nil {
 		// Already queued/running, safety lockout, etc. — logged once.

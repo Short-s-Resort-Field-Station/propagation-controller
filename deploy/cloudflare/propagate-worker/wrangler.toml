@@ -1,0 +1,16 @@
+# Cloudflare Worker: serves the Propagation Unit dashboard on the main site's
+# zone at shortsfieldstation.org/propagate/* (unlisted page) by proxying to
+# the unit's tunnel hostname. Deploy from this directory:  npx wrangler deploy
+name = "srfs-propagate-proxy"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+# Worker routes run before the Cloudflare Pages site on the same zone, so
+# only this path is intercepted; everything else still comes from Pages.
+routes = [
+  { pattern = "shortsfieldstation.org/propagate*", zone_name = "shortsfieldstation.org" },
+  { pattern = "www.shortsfieldstation.org/propagate*", zone_name = "shortsfieldstation.org" },
+]
+
+[vars]
+ORIGIN = "https://unit01.shortsfieldstation.org"

@@ -1,13 +1,46 @@
 // Thin REST client for the propagationd API (spec §15).
 
-const BASE = '/api/v1';
+// The app is served under /propagate/ (public reverse proxy and the Go server's
+// mirror mount), so every API call carries the prefix too.
+export const BASE = '/propagate/api/v1';
+
+// Audit 3.5: a wedged daemon or black-holed Wi-Fi path must not leave fetches
+// pending forever — GETs give up after 4 s, mutations after 8 s.
+const GET_TIMEOUT_MS = 4000;
+const MUTATION_TIMEOUT_MS = 8000;
+
+// Audit 3.10/3.11: the dashboard registers a handler here so any 401 (expired
+// cookie, revoked account) clears its session and reopens sign-in. Login
+// itself is exempt — a wrong password is a 401 too and the modal shows it.
+let unauthorizedHandler = null;
+export function onUnauthorized(fn) { unauthorizedHandler = fn; }
+
+function withTimeout(opts) {
+  const o = opts ? { ...opts } : {};
+  if (!o.signal && typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    const isGet = !o.method || o.method === 'GET';
+    o.signal = AbortSignal.timeout(isGet ? GET_TIMEOUT_MS : MUTATION_TIMEOUT_MS);
+  }
+  return o;
+}
 
 async function req(path, opts) {
-  const res = await fetch(BASE + path, opts);
+  let res;
+  try {
+    res = await fetch(BASE + path, withTimeout(opts));
+  } catch (e) {
+    // AbortError (timeout) and network failures surface as one plain message.
+    throw new Error(e && e.name === 'TimeoutError' ? 'controller not responding' : (e && e.message) || 'network error');
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).error || msg; } catch { /* keep statusText */ }
-    throw new Error(msg);
+    if (res.status === 401 && unauthorizedHandler && path !== '/auth/login') {
+      try { unauthorizedHandler(msg); } catch { /* never mask the real error */ }
+    }
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -62,6 +95,7 @@ export const api = {
   }),
 
   runZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/run`, { actor, reason: 'water now' }),
+  drainZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/drain`, { actor, reason: 'drain tray' }),
   stopZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/stop`, { actor }),
   patchZone: (zoneKey, body) => req(`/irrigation/zones/${zoneKey}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -69,7 +103,10 @@ export const api = {
   putMoistureControl: (zoneKey, body) => req(`/irrigation/zones/${zoneKey}/moisture-control`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }),
-  lightingSet: (mode, actor) => post(`/lighting/${mode}`, { actor }),
+  // mode: on | off | auto. expiresMinutes > 0 makes an on/off override lapse
+  // back to the schedule on its own (audit 3.10); 0/undefined = until cleared.
+  lightingSet: (mode, actor, expiresMinutes) => post(`/lighting/${mode}`,
+    expiresMinutes > 0 ? { actor, expires_minutes: expiresMinutes } : { actor }),
   putLightingSchedule: (sch) => req('/lighting/schedule', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sch),
   }),

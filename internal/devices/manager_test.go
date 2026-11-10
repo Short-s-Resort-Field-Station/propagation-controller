@@ -72,15 +72,39 @@ func TestStartForcesPumpAndValvesOff(t *testing.T) {
 			offByStartup[a.RelayChannel] = true
 		}
 	}
-	for _, ch := range []int{2, 3, 4, 5, 6} {
+	for _, ch := range SafeOffChannels {
 		if !offByStartup[ch] {
 			t.Errorf("relay %d not forced off at startup", ch)
 		}
+	}
+	if offByStartup[LightsChannel] {
+		t.Error("lights must not be touched by the startup safe state")
 	}
 
 	info, _ := mgr.GetRelay(context.Background(), 2)
 	if info.State != relay.Off {
 		t.Errorf("pump state after startup = %v, want off", info.State)
+	}
+}
+
+// TestSafeOffChannelsCoverEverythingButLights pins the as-built map: the
+// watchdog's forced safe state uses the same list, so a drift here would
+// leave a valve open after a crash (audit 2026-11-10, 2.5).
+func TestSafeOffChannelsCoverEverythingButLights(t *testing.T) {
+	seen := map[int]bool{}
+	for _, ch := range SafeOffChannels {
+		seen[ch] = true
+	}
+	for ch := 1; ch <= relay.NumChannels; ch++ {
+		if ch == LightsChannel {
+			if seen[ch] {
+				t.Errorf("lights channel %d must not be in SafeOffChannels", ch)
+			}
+			continue
+		}
+		if !seen[ch] {
+			t.Errorf("channel %d missing from SafeOffChannels", ch)
+		}
 	}
 }
 

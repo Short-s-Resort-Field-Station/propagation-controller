@@ -67,6 +67,20 @@ const (
 	LockoutPumpMaxRuntime   = "pump_max_runtime"
 )
 
+// stateKey is the settings row holding the latched state that must survive
+// a restart: the e-stop and manual lockouts (audit 2026-11-10, 2.3). Auto
+// lockouts are not stored; they re-evaluate from live readings.
+const stateKey = "safety_state"
+
+// dbErrorThreshold is how many consecutive failed reservoir reads count as
+// a persistent DB fault rather than a blip (audit 2026-11-10, 2.13 F10).
+const dbErrorThreshold = 3
+
+type persistedState struct {
+	EmergencyStop EstopState `json:"emergency_stop"`
+	Lockouts      []Lockout  `json:"lockouts"`
+}
+
 type Lockout struct {
 	Key    string    `json:"key"`
 	Reason string    `json:"reason"`
@@ -118,6 +132,13 @@ type Supervisor struct {
 	lockouts    map[string]*Lockout
 	pumpOnSince *time.Time
 	running     bool
+	// pumpExpected is the irrigation engine's word that it is running the
+	// pump right now. Used to decide whether a pump found on after a relay
+	// outage is a cycle or an orphan (audit 2026-11-10, 2.2c).
+	pumpExpected bool
+	relayDown    bool
+	dbErrors     int
+	onEstop      func()
 }
 
 func NewSupervisor(mgr *devices.Manager, readings *storage.ReadingRepo,
@@ -168,6 +189,10 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		s.settings.Set("safety", string(body))
 	}
 
+	// Latched state comes back before the loop runs: an e-stop that was
+	// never reset must still be an e-stop after a deploy or a power blip.
+	s.loadState(ctx)
+
 	s.mu.Lock()
 	s.running = true
 	s.mu.Unlock()
@@ -210,6 +235,103 @@ func (s *Supervisor) UpdateConfig(cfg Config) error {
 	return nil
 }
 
+// loadState restores the e-stop latch and manual lockouts from settings and
+// re-forces the safe state if the latch is set.
+func (s *Supervisor) loadState(ctx context.Context) {
+	raw, ok, err := s.settings.Get(stateKey)
+	if err != nil {
+		s.events.Error("safety_state_load_failed", "could not read persisted safety state", "startup",
+			map[string]any{"error": err.Error()})
+		return
+	}
+	if !ok {
+		return
+	}
+	var st persistedState
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		s.events.Error("safety_state_invalid", "persisted safety state is unreadable; ignoring", "startup",
+			map[string]any{"error": err.Error()})
+		return
+	}
+	s.mu.Lock()
+	s.estop = st.EmergencyStop
+	restored := make([]string, 0, len(st.Lockouts))
+	for _, lo := range st.Lockouts {
+		if lo.Auto || lo.Key == "" {
+			continue
+		}
+		l := lo
+		s.lockouts[lo.Key] = &l
+		restored = append(restored, lo.Key)
+	}
+	estop := s.estop
+	includeLights := s.cfg.EstopIncludesLights
+	s.mu.Unlock()
+
+	if estop.Active {
+		s.forceSafeState(ctx, includeLights, "emergency stop restored after restart")
+		s.events.Error("emergency_stop_restored",
+			"EMERGENCY STOP still latched from before the restart — manual reset required", "startup",
+			map[string]any{"reason": estop.Reason, "actor": estop.Actor, "at": estop.At})
+	}
+	if len(restored) > 0 {
+		sort.Strings(restored)
+		s.events.Warn("safety_lockouts_restored",
+			"manual lockouts restored after restart: "+strings.Join(restored, ", "), "startup",
+			map[string]any{"lockouts": restored})
+	}
+}
+
+// persistStateLocked writes the e-stop latch and manual lockouts. Caller
+// must hold s.mu.
+func (s *Supervisor) persistStateLocked() {
+	st := persistedState{EmergencyStop: s.estop, Lockouts: []Lockout{}}
+	for _, lo := range s.lockouts {
+		if !lo.Auto {
+			st.Lockouts = append(st.Lockouts, *lo)
+		}
+	}
+	sort.Slice(st.Lockouts, func(i, j int) bool { return st.Lockouts[i].Key < st.Lockouts[j].Key })
+	body, err := json.Marshal(st)
+	if err == nil {
+		err = s.settings.Set(stateKey, string(body))
+	}
+	if err != nil {
+		s.log.Error().Err(err).Msg("safety: failed to persist state")
+	}
+}
+
+// OnEmergencyStop registers a hook run on every e-stop, before the relays
+// are forced: the irrigation engine uses it to abort the active cycle and
+// clear the queue so it does not sit "draining" against a closed valve
+// (audit 2026-11-10, 2.6).
+func (s *Supervisor) OnEmergencyStop(fn func()) {
+	s.mu.Lock()
+	s.onEstop = fn
+	s.mu.Unlock()
+}
+
+// SetPumpExpected is the engine's report that it is (true) or is no longer
+// (false) running the pump. On false, if the relay confirms off, the runtime
+// window closes immediately instead of at the next 1 Hz sample — otherwise
+// back-to-back soaks with drain_seconds=0 read as one long run and trip the
+// backstop (audit 2026-11-10, 2.13 F9).
+func (s *Supervisor) SetPumpExpected(on bool) {
+	s.mu.Lock()
+	s.pumpExpected = on
+	s.mu.Unlock()
+	if on {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if info, err := s.mgr.GetRelay(ctx, devices.PumpChannel); err == nil && info.State == relay.Off {
+		s.mu.Lock()
+		s.pumpOnSince = nil
+		s.mu.Unlock()
+	}
+}
+
 // Authorize is consulted before any relay command is executed. Turning
 // things OFF is always allowed — safety must never trap a relay on.
 func (s *Supervisor) Authorize(channel int, state relay.State) error {
@@ -241,8 +363,13 @@ func (s *Supervisor) EmergencyStop(ctx context.Context, actor, reason string) {
 	alreadyActive := s.estop.Active
 	s.estop = EstopState{Active: true, Reason: reason, Actor: actor, At: time.Now().UTC()}
 	includeLights := s.cfg.EstopIncludesLights
+	hook := s.onEstop
+	s.persistStateLocked()
 	s.mu.Unlock()
 
+	if hook != nil {
+		hook()
+	}
 	s.forceSafeState(ctx, includeLights, "emergency stop")
 	if !alreadyActive {
 		s.events.Error("emergency_stop", "EMERGENCY STOP activated — manual reset required", actor,
@@ -259,6 +386,7 @@ func (s *Supervisor) Reset(actor string) error {
 		return fmt.Errorf("emergency stop is not active")
 	}
 	s.estop = EstopState{}
+	s.persistStateLocked()
 	s.events.Info("emergency_stop_reset", "emergency stop reset; automation may resume", actor, nil)
 	return nil
 }
@@ -274,6 +402,7 @@ func (s *Supervisor) ClearLockout(key, actor string) error {
 		return fmt.Errorf("lockout %q tracks a live condition and clears itself when the condition resolves", key)
 	}
 	delete(s.lockouts, key)
+	s.persistStateLocked()
 	s.events.Info("safety_lockout_cleared", fmt.Sprintf("lockout %s cleared", key), actor,
 		map[string]any{"lockout": key})
 	return nil
@@ -346,14 +475,41 @@ func (s *Supervisor) tick(ctx context.Context) {
 
 	snapshot, err := s.mgr.Snapshot(ctx)
 	if err != nil {
-		// Relay controller unreachable: nothing to enforce against; the
-		// device manager and health endpoint surface this failure.
+		// Relay controller unreachable: nothing to enforce against. Say so
+		// once per outage; the relays hold their last state on external
+		// 12 V, so an operator needs to know (audit 2026-11-10, 2.2c).
+		s.mu.Lock()
+		first := !s.relayDown
+		s.relayDown = true
+		s.mu.Unlock()
+		if first {
+			s.events.Error("relay_controller_unreachable",
+				"relay controller unreachable — relays hold their last state; pump cannot be switched off until it returns",
+				"safety_supervisor", map[string]any{"error": err.Error()})
+		}
 		return
 	}
 	pumpOn := false
 	for _, r := range snapshot {
 		if r.Channel == devices.PumpChannel {
 			pumpOn = r.State == relay.On
+		}
+	}
+
+	s.mu.Lock()
+	recovered := s.relayDown
+	s.relayDown = false
+	expected := s.pumpExpected
+	s.mu.Unlock()
+	if recovered && pumpOn && !expected {
+		// The board came back with the pump on and no cycle claiming it:
+		// whatever started it may have died during the outage.
+		if _, err := s.mgr.SetRelay(ctx, devices.PumpChannel, relay.Off, "safety_supervisor",
+			"relay controller recovered with pump on and no cycle running", 0); err == nil {
+			s.events.Warn("pump_forced_off",
+				"pump forced off after relay controller recovery — no irrigation cycle was running",
+				"safety_supervisor", nil)
+			pumpOn = false
 		}
 	}
 
@@ -408,8 +564,25 @@ func (s *Supervisor) trackPumpRuntime(ctx context.Context, pumpOn bool, cfg Conf
 func (s *Supervisor) evaluateReservoir(ctx context.Context, cfg Config) {
 	latest, err := s.readings.Latest(cfg.ReservoirSensorKey)
 	if err != nil {
+		// A DB that cannot be read means the level cannot be verified; after
+		// a few consecutive failures treat it like a dead sensor rather than
+		// freezing the last lockout state (audit 2026-11-10, 2.13 F10).
+		s.mu.Lock()
+		s.dbErrors++
+		n := s.dbErrors
+		s.mu.Unlock()
+		if n == dbErrorThreshold {
+			s.events.Error("safety_db_read_failed",
+				"reservoir reading unavailable: database reads failing; irrigation locked out",
+				"safety_supervisor", map[string]any{"error": err.Error()})
+			s.setLockout(LockoutReservoirOffline,
+				"reservoir level cannot be verified: database reads failing", true)
+		}
 		return
 	}
+	s.mu.Lock()
+	s.dbErrors = 0
+	s.mu.Unlock()
 
 	fresh := latest != nil &&
 		time.Since(latest.ReadAt) <= time.Duration(cfg.SensorStaleAfterSeconds)*time.Second
@@ -459,6 +632,9 @@ func (s *Supervisor) setLockout(key, reason string, auto bool) {
 	_, exists := s.lockouts[key]
 	if !exists {
 		s.lockouts[key] = &Lockout{Key: key, Reason: reason, Since: time.Now().UTC(), Auto: auto}
+		if !auto {
+			s.persistStateLocked()
+		}
 	}
 	s.mu.Unlock()
 	if !exists {

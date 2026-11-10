@@ -101,10 +101,10 @@ not open.
 |---|------|------|---------------|-------|
 | 1 | **Piconium** (Embedded Now, Kit 002 or 003) | The unit's mind | — | x86-64, 4 GB RAM, NVMe for OS & records. Kit 003's Atom E3845 wants `intel_idle.max_cstate=1`. |
 | 2 | **Numato Lab 8-channel USB relay module** | The unit's hands | USB · `/dev/ttyACM*` | Loads wired **normally-open**: de-energized = off. All channels spoken for at 6 shelves — expansion means a second board. |
-| 3 | **Barina grow lights** | Photoperiod | Relay 1 | 120 VAC — the only mains load. Rack-wide circuit; per-shelf dark via the physical switch. |
-| 4 | **SEAFLO diaphragm pump** | Water from jug to manifold | Relay 2 | 12 VDC. Verify amperage against ~7 A contacts; interpose an automotive relay if close. Flyback diode. |
-| 5 | **U.S. Solid JFSV00012 solenoid valves ×4** | One per shelf | Relays 3–6 | 12 VDC, **normally closed** — power loss seals the water in the jug. Flyback diodes. |
-| 6 | **12 V USB desk fans** (plugs stripped) | Air across the canopy | Relay 7 | Single speed, ganged as one circuit, one honest toggle. |
+| 3 | **T5 grow lights** (8 × 1 ft, 5 W) | Photoperiod | Relay 8 (silkscreen 7) | 120 VAC. One circuit, all fixtures on or off together — there is no per-shelf lighting. |
+| 4 | **Hydrofarm pump** (33 W) | Water from reservoir to manifold | Relay 7 (silkscreen 6) | 120 VAC, plugged into the GFCI gang box at the rack. |
+| 5 | **U.S. Solid JFSV00012 solenoid valves ×3** (+1 reserved) | One per shelf | Relays 1–3 (silkscreen 0–2); 5 reserved | 12 VDC, **normally closed** — power loss seals the water in the jug. Flyback diodes. |
+| 6 | **Circulation fans** (5 V via 12→5 V buck) | Air across the canopy | Relay 4 (silkscreen 3) | Single speed, ganged as one circuit, one honest toggle. |
 | 7 | **Waveshare 5″ touchscreen** (800×480) | The rack face | HDMI + USB HID | No drivers. UI drawn on an 880×528 canvas, scaled exactly. |
 | 8 | **Xiusiyt RS485-WE-1800-BT cable** | The sensor party line | USB · `/dev/ttyUSB*` | Genuine FT232RQ + SP485EN, auto TX-direction, Tx/Rx lamps. Jumper Term1↔Term2 for 120 Ω termination. |
 | 9 | **RS485 soil probes** (moisture · temp · EC) | Per-shelf ground truth | Modbus RTU, 4800 8N1 | ZTS-3000, IP68, 12 V. Ship at address 1 — commission **one at a time** and re-address. Register map verified at the bench (no pH channel). |

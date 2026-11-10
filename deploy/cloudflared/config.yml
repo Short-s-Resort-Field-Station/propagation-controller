@@ -1,0 +1,16 @@
+# /etc/cloudflared/config.yml on the Piconium.
+# Outbound-only tunnel; no ports opened on the shop network.
+# Create once:  cloudflared tunnel login
+#               cloudflared tunnel create propagation-unit-01
+#               cloudflared tunnel route dns propagation-unit-01 unit01.shortsfieldstation.org
+#               sudo cloudflared service install   (runs this file as a systemd unit)
+tunnel: propagation-unit-01
+credentials-file: /etc/cloudflared/propagation-unit-01.json
+ingress:
+  - hostname: unit01.shortsfieldstation.org
+    service: http://localhost:80
+    originRequest:
+      noTLSVerify: true
+      # SSE (/propagate/api/v1/events/stream) is long-lived
+      keepAliveTimeout: 90s
+  - service: http_status:404

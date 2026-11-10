@@ -82,8 +82,8 @@ func TestSeedStartAndPoll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list sensors: %v", err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("got %d sensors, want 2", len(list))
+	if len(list) != 4 {
+		t.Fatalf("got %d sensors, want 4", len(list))
 	}
 }
 
@@ -98,7 +98,7 @@ func TestPollNowStoresReadings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollNow: %v", err)
 	}
-	if len(got) != 1 || got[0].SensorKey != "reservoir_level_level" {
+	if len(got) != 2 || got[0].SensorKey != "reservoir_level_level" {
 		t.Fatalf("unexpected readings: %+v", got)
 	}
 	stored, err := readings.Latest("reservoir_level_level")
@@ -114,7 +114,7 @@ func TestOfflineDetectionAndRecovery(t *testing.T) {
 	// Fast polling so the failure threshold trips quickly.
 	dev, _ := devices.GetByKey("soil_zone_1")
 	cfg := Config{
-		ModbusAddress:        1,
+		ModbusAddress:        11,
 		PollIntervalSeconds:  1,
 		OfflineAfterFailures: 2,
 		Registers:            []RegisterSpec{{Name: "moisture", Register: 0, DataType: "uint16", Scale: 0.1, Unit: "%"}},

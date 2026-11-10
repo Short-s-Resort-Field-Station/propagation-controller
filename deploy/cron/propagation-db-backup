@@ -1,0 +1,15 @@
+#!/bin/sh
+# Nightly consistent SQLite snapshot of the unit's database (safe under WAL),
+# 14-day rotation. Installed at /etc/cron.daily/propagation-db-backup.
+set -e
+d=/var/backups/propagation-controller
+mkdir -p "$d"
+python3 - "$d" <<'PY'
+import sqlite3, datetime, sys
+d = sys.argv[1]
+src = sqlite3.connect("file:/var/lib/propagation-controller/propagation.db?mode=ro", uri=True)
+dst = sqlite3.connect("%s/propagation-%s.db" % (d, datetime.date.today().isoformat()))
+src.backup(dst)
+dst.close(); src.close()
+PY
+find "$d" -name 'propagation-*.db' -mtime +14 -delete

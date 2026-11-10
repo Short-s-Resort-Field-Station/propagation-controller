@@ -15,8 +15,8 @@ type driftReg struct {
 	value, min, max, step int
 }
 
-// MockBus is the simulation-mode Modbus bus (spec §24.4). Slave 1 mimics the
-// soil sensor, slave 2 the reservoir level transmitter, with raw values that
+// MockBus is the simulation-mode Modbus bus (spec §24.4). Slaves 1-3 mimic the
+// shelf soil probes (11-13), slave 1 the reservoir level transmitter, with raw values that
 // match the seeded default register maps.
 type MockBus struct {
 	mu      sync.Mutex
@@ -30,15 +30,32 @@ func NewMockBus() *MockBus {
 	return &MockBus{
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 		banks: map[uint8]map[uint16]*driftReg{
-			1: { // soil sensor (moisture/temp are raw x10; EC is raw µS/cm)
-				0: {value: 312, min: 250, max: 420, step: 3},      // moisture %
-				1: {value: 225, min: 200, max: 260, step: 2},      // temperature °C
-				2: {value: 1150, min: 900, max: 1450, step: 8},    // substrate EC µS/cm
-			},
-			2: { // reservoir level transmitter
-				0: {value: 820, min: 650, max: 900, step: 2}, // level %
+			// Three ZTS-3000 soil probes, one per shelf (moisture/temp raw x10,
+			// EC raw µS/cm), at addresses 11-13 @ 9600 — as commissioned 2026-11-10.
+			11: soilBank(312, 225, 1150),
+			12: soilBank(288, 221, 980),
+			13: soilBank(340, 228, 1320),
+			// Hydrostatic reservoir level transmitter at factory address 1: register 4
+			// is level x10 in cm (full scale 100.0 cm). ~24.6 cm of a 30 cm
+			// placeholder full depth ≈ 82 %.
+			1: {
+				0: {value: 1, min: 1, max: 1, step: 0},
+				1: {value: 3, min: 3, max: 3, step: 0},
+				2: {value: 17, min: 17, max: 17, step: 0},
+				3: {value: 1, min: 1, max: 1, step: 0},
+				4: {value: 246, min: 195, max: 270, step: 2},
+				5: {value: 0, min: 0, max: 0, step: 0},
+				6: {value: 1000, min: 1000, max: 1000, step: 0},
 			},
 		},
+	}
+}
+
+func soilBank(moist, temp, ec int) map[uint16]*driftReg {
+	return map[uint16]*driftReg{
+		0: {value: moist, min: 250, max: 420, step: 3},
+		1: {value: temp, min: 200, max: 260, step: 2},
+		2: {value: ec, min: 900, max: 1450, step: 8},
 	}
 }
 

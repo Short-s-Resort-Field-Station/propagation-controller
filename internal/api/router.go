@@ -91,12 +91,12 @@ func NewRouter(d Deps) http.Handler {
 		cycles:       d.Cycles,
 		// change 3: species profiles repo derives from the shared DB handle —
 		// no new Deps wiring needed at the cmd layer.
-		profiles: storage.NewSpeciesProfileRepo(d.DB),
-		eventLog: d.EventLog,
-		db:           d.DB,
-		log:          d.Log,
-		startedAt:    time.Now(),
-		simulation:   d.Simulation,
+		profiles:   storage.NewSpeciesProfileRepo(d.DB),
+		eventLog:   d.EventLog,
+		db:         d.DB,
+		log:        d.Log,
+		startedAt:  time.Now(),
+		simulation: d.Simulation,
 	}
 
 	r := chi.NewRouter()
@@ -137,6 +137,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/irrigation/zones/{zone_key}", s.handleGetZone)
 		r.Patch("/irrigation/zones/{zone_key}", s.handlePatchZone)
 		r.Post("/irrigation/zones/{zone_key}/run", s.handleRunZone)
+		r.Post("/irrigation/zones/{zone_key}/drain", s.handleDrainZone)
 		r.Post("/irrigation/zones/{zone_key}/stop", s.handleStopZone)
 		r.Get("/irrigation/cycles", s.handleListCycles)
 		r.Get("/irrigation/cycles/{cycle_id}", s.handleGetCycle)
@@ -179,7 +180,30 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	s.uiRoutes(r)
-	return r
+	return withPublicPrefix(r)
+}
+
+// PublicPrefix is the path the whole app is also served under, so the same
+// build works behind the shortsfieldstation.org/propagate reverse proxy
+// (Cloudflare Worker → Tunnel → this box). The web bundle is built with
+// base "/propagate/", so the kiosk and the LAN dashboard use the prefixed
+// URLs too; the bare root keeps serving the API and assets for scripts, and
+// the two page URLs redirect to their prefixed form (Austin, 2026-11-10).
+const PublicPrefix = "/propagate"
+
+func withPublicPrefix(app http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(PublicPrefix+"/", http.StripPrefix(PublicPrefix, app))
+	mux.Handle(PublicPrefix, http.RedirectHandler(PublicPrefix+"/", http.StatusFound))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/", "/ui/touch":
+			http.Redirect(w, r, PublicPrefix+r.URL.Path, http.StatusFound)
+			return
+		}
+		app.ServeHTTP(w, r)
+	})
+	return mux
 }
 
 func (s *Server) requestLogger(next http.Handler) http.Handler {
