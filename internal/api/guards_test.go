@@ -70,6 +70,7 @@ func newGuardServer(t *testing.T) (*Server, http.Handler) {
 	r := chi.NewRouter()
 	r.Post("/relays/{channel}/set", s.handleSetRelay)
 	r.Post("/diagnostics/modbus/scan", s.handleModbusScan)
+	r.Post("/system/shutdown", s.handleSystemShutdown)
 	return s, r
 }
 
@@ -165,5 +166,25 @@ func TestSetupOnlyFromLoopback(t *testing.T) {
 		if got := setupAllowedFrom(req); got != c.want {
 			t.Errorf("setupAllowedFrom(%s xff=%q) = %v, want %v", c.remote, c.xff, got, c.want)
 		}
+	}
+}
+
+// TestSystemShutdownMakesSafeThenPowersOff: the hidden power-down stops the
+// engine, forces relays off, answers 202, then calls the power-off hook.
+func TestSystemShutdownMakesSafeThenPowersOff(t *testing.T) {
+	s, r := newGuardServer(t)
+	called := make(chan struct{}, 1)
+	s.powerOff = func() error { called <- struct{}{}; return nil }
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/system/shutdown", strings.NewReader(`{"actor":"manual_touch"}`))
+	req.RemoteAddr = "127.0.0.1:1"
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-called:
+	case <-time.After(4 * time.Second):
+		t.Fatal("power-off hook not called")
 	}
 }

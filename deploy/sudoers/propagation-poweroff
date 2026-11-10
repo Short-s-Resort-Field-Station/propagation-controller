@@ -1,0 +1,4 @@
+# Lets the propagationd service user power the controller off from the
+# touch-screen shutdown (POST /system/shutdown) after the unit is made safe.
+# Install: install -m 440 deploy/sudoers/propagation-poweroff /etc/sudoers.d/
+propagation ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff

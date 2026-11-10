@@ -88,6 +88,7 @@ function App() {
           onWater={actions.water}
           onDrain={actions.drain}
           onStop={actions.stop}
+          onShutdown={actions.shutdown}
           onLight={actions.lights}
           onFan={actions.fans}
           theme={theme}

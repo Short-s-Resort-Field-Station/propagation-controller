@@ -8,7 +8,7 @@ export const FANS_RELAY = 4;
 const CAT_STRIPE = {
   canopy: 'var(--sage-deep)', nurse: 'var(--ochre)', riparian: 'var(--river)',
   wildlife: 'var(--ochre)', specialty: 'var(--oxblood)', shrub: 'var(--sage)',
-  vine: 'var(--sage)',
+  vine: 'var(--sage)', grass: 'var(--river)',
 };
 
 export const cToF = (c) => Math.round(c * 9 / 5 + 32);
@@ -126,6 +126,8 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
     const species = cfg.species2 ? `${species1} + ${cfg.species2}` : species1;
     const tag1 = (cfg.species_latin || (z.enabled ? '' : 'EMPTY BAY')).toUpperCase();
     const tag = cfg.species2_latin ? `${tag1} · ${cfg.species2_latin.toUpperCase()}` : tag1;
+    // Latin names as written (italicised by the UIs, after the common name).
+    const latin = [cfg.species_latin, cfg.species2_latin].filter(Boolean).join(' · ');
     const cat = (cfg.species_category || '').toLowerCase();
 
     return {
@@ -142,6 +144,7 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
       assigned,
       species,
       tag,
+      latin,
       // change 3 (species profiles): monitoring-only happy-band ranges + the
       // applied-profile linkage, surfaced for the gauges, adherence tracking,
       // and the edit/save-profile flow.
@@ -268,6 +271,7 @@ export function buildSpeciesCatalog(speciesResp) {
     id: s.id, // change 3: carry the botanical ID so profiles can key off it
     species: s.common_name,
     tag: s.latin_name.toUpperCase(),
+    latin: s.latin_name,
     hab: s.category.charAt(0).toUpperCase() + s.category.slice(1) +
       ' · ' + s.method + ' · difficulty ' + s.difficulty + '/5',
     category: s.category,

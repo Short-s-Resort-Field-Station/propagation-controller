@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // photoperiod must not fall back to UTC on a box without zoneinfo
@@ -26,6 +29,8 @@ import (
 	"propagation-controller/internal/safety"
 	"propagation-controller/internal/storage"
 	"propagation-controller/internal/version"
+
+	"github.com/rs/zerolog"
 )
 
 func main() {
@@ -165,6 +170,7 @@ func main() {
 		Safety:     supervisor,
 		Irrigation: engine,
 		Lighting:   lightSvc,
+		PowerOff:   powerOffFunc(cfg, log),
 		Auth:       authSvc,
 		Bus:        hub,
 		Moisture:   moistureRepo,
@@ -210,4 +216,20 @@ func main() {
 	mgr.Shutdown(shutdownCtx)
 	srv.Shutdown(shutdownCtx)
 	eventLog.Info("shutdown_complete", "propagationd stopped cleanly", "system", nil)
+}
+
+// powerOffFunc returns the shutdown hook for POST /system/shutdown: nil in
+// simulation (log only), otherwise the configured command via sh -c.
+func powerOffFunc(cfg config.Config, log zerolog.Logger) func() error {
+	if cfg.Simulation || cfg.PowerOffCmd == "" {
+		return nil
+	}
+	return func() error {
+		log.Warn().Str("cmd", cfg.PowerOffCmd).Msg("powering off")
+		out, err := exec.Command("sh", "-c", cfg.PowerOffCmd).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
 }

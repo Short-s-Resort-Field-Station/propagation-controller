@@ -85,7 +85,7 @@ function Plate({ s, onOpen }){
     <div className="rk2-plate" onClick={()=>onOpen(s)}>
       <div className="ph">Shelf · {s.n}</div>
       {/* audit 3.12: long names clamp to two lines inside the centred box */}
-      <div className={'nm'+((s.species||'').length>22?' long':'')}><span className="clamp">{s.species}</span></div>
+      <div className={'nm'+((s.species||'').length>22?' long':'')}><span className="clamp">{s.species}{s.latin ? <em className="lat"> {s.latin}</em> : null}</span></div>
       <div className="dial"><DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={100} active={s.probe}/></div>
       {s.probe
         ? <div className="rd">{s.moisture} <small>%VWC</small></div>
@@ -116,7 +116,7 @@ function Ledger({ shelves, onOpen }){
         return (
           <div className="rk2-lrow" key={s.n} onClick={()=>onOpen(s)}>
             <div><span className="rn">{s.n}</span></div>
-            <div><span className="sp">{s.species}<small>{s.tag}</small></span></div>
+            <div><span className="sp">{s.species}{s.latin ? <small><em>{s.latin}</em></small> : null}</span></div>
             <div>
               <div style={{width:'100%'}}>
                 <div className="rk2-mini"><i style={{width:s.moisture+'%',background:inBand?col:'var(--ochre-l)'}}></i>
@@ -164,8 +164,8 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
           <span className="rk2-plaque" style={{color:col,borderColor:col}}><span style={{width:6,height:6,background:col,transform:'rotate(45deg)',display:'inline-block'}}></span>{label} · {sev}</span>
         </div>
         <div className="rk2-dname">
-          <div className="nm">{s.species}</div>
-          <div className="tg">Shelf {s.n}{s.tag ? ' · '+s.tag : ''}</div>
+          <div className="nm">{s.species}{s.latin ? <em className="lat"> {s.latin}</em> : null}</div>
+          <div className="tg">Shelf {s.n}{s.latin ? <React.Fragment> · <em>{s.latin}</em></React.Fragment> : null}</div>
         </div>
         {/* claude-design refined 3-dial detail (marker + centered readout),
             wired to the live moisture / temp / EC bands. no-probe → dimmed dash. */}
@@ -271,8 +271,20 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
   );
 }
 
-function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onStop, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
+function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onStop, onShutdown, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
+  // Easter egg (Austin, 2026-11-10): press and hold the thin divider under the
+  // title for 3 s to get the power-down popup. Nothing visible, nothing to
+  // bump by accident. 'idle' | 'ask' | 'down'
+  const [power, setPower] = React.useState('idle');
+  const holdRef = React.useRef(null);
+  const holdStart = () => { if (holdRef.current) return; holdRef.current = setTimeout(() => { holdRef.current = null; setPower('ask'); }, 3000); };
+  const holdEnd = () => { if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null; } };
+  const doShutdown = async () => {
+    setPower('down');
+    const ok = onShutdown ? await onShutdown() : false;
+    if (ok === false) setPower('idle');
+  };
   const [watering, setWatering] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const pendingRef = React.useRef(false);
@@ -330,7 +342,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
           <div className="rk2-eye"><span className="st"></span>Dept. of Forestry · Field Station<span className="st"></span></div>
           <div className="rk2-ttl">Propagation Unit · No. 01</div>
         </div>
-        <div className="rk2-div"><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
+        <div className="rk2-div rk2-hold" onPointerDown={holdStart} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} onContextMenu={e=>e.preventDefault()}><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
         <div className="rk2-sub">
           <span className="date">Day · <b>{day || '06 / 21 / 26'}</b></span>
           <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{statusText}</span>
@@ -351,7 +363,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
         </div>
 
         <div className="rk2-resv">
-          <div className="lab"><span className="ln"></span>Reservoir · 26.5 L Tank<span className="ln"></span></div>
+          <div className="lab"><span className="ln"></span>Reservoir · {PG.TANK_L} L Tank<span className="ln"></span></div>
           <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div></div>
           {/* audit 3.9: a stale level probe reads "— %" / "sensor offline"; liters and days are estimates */}
           {reservoirOnline
@@ -365,6 +377,28 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
       {/* the toast also shows over the detail screen */}
       {current && toast && (
         <div className="rk2-toast over" onClick={onDismissToast} role="status"><span className="d"></span>{toast.text}</div>
+      )}
+      {power !== 'idle' && (
+        <div className="rk2-power" onClick={()=>{ if (power==='ask') setPower('idle'); }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:'#1B1812',border:'1.5px solid var(--ochre-l)',borderRadius:10,padding:'22px 26px',maxWidth:440,textAlign:'center',color:'var(--lcd)'}}>
+            {power === 'ask' ? (
+              <React.Fragment>
+                <div style={{fontFamily:'"Zilla Slab",serif',fontWeight:900,fontSize:18,marginBottom:8,color:'var(--ochre-l)'}}>Power down Unit 01?</div>
+                <div style={{fontFamily:'"Newsreader",serif',fontSize:15,lineHeight:1.5,marginBottom:18}}>Stops any watering, switches every relay off, and shuts the controller down cleanly. Switch the power off once the screen goes dark.</div>
+                <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+                  <button className="rk2-plaque" style={{justifyContent:'center'}} onClick={()=>setPower('idle')}>Cancel</button>
+                  <button className="rk2-wbtn rk2-dbtn" style={{padding:'10px 20px',color:'var(--ochre-l)',borderColor:'var(--ochre-l)'}} onClick={doShutdown}>Shut Down</button>
+                </div>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <div style={{fontFamily:'"Zilla Slab",serif',fontWeight:900,fontSize:18,marginBottom:8,color:'var(--ochre-l)'}}>Shutting down</div>
+                <div style={{fontFamily:'"Newsreader",serif',fontSize:15,lineHeight:1.5}}>Relays off. The screen will go dark in a few seconds.</div>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
       )}
       {locked && <LockScreen clock={clock} onUnlock={onUnlock}/>}
     </div>

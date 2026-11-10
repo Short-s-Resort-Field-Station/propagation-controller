@@ -112,5 +112,7 @@ export const api = {
   }),
   setRelay: (channel, state, actor, reason) => post(`/relays/${channel}/set`, { state, actor, reason }),
   emergencyStop: (actor) => post('/safety/emergency-stop', { actor }),
+  // Hidden touch-screen power-down: stops cycles, relays off, then the OS halts.
+  shutdown: (actor) => post('/system/shutdown', { actor, reason: 'shutdown from the screen' }),
   safetyReset: (actor) => post('/safety/reset', { actor }),
 };

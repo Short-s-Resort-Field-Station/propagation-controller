@@ -102,6 +102,12 @@ Cloudflare Tunnel `propagation-unit-01` (id c66ac740-a684-4e44-9e10-45663239e8bb
 Hostname `unit01.shortsfieldstation.org` → `http://localhost:80`. Verified 200 for `/propagate/api/v1/health` and `/propagate/ui/touch` through the edge.
 Public page = Worker `srfs-propagate-proxy` on route `shortsfieldstation.org/propagate*` (deploy/cloudflare/propagate-worker), noindex.
 
+## Screen features (2026-11-10)
+
+- **Hidden power-down**: press and hold the thin divider line under the title for 3 s → "Power down Unit 01?" popup → Shut Down stops any cycle, forces every relay off, logs `system_shutdown_requested`, and runs `sudo -n systemctl poweroff` (sudoers rule `deploy/sudoers/propagation-poweroff` installed in /etc/sudoers.d). Endpoint `POST /system/shutdown`, admin-only (kiosk = loopback admin).
+- **Species catalog** mirrors the website's 29 woody plates + Inland Sea Oats (30; Monterrey Oak and Muscadine Grape dropped at Austin's request). Latin names shown in italics after the common name on the plate, ledger, detail, dashboard card, and in the picker. Reservoir labels now derive from `PG.TANK_L` (18.9 L).
+- Page handlers send `Cache-Control: no-cache` so the kiosk picks up new bundles on restart.
+
 ## Log
 - 2026-11-10 — First real watering: Shelf 2, 60 s manual via engine. valve 2 + pump on → pump off at 60 s → 5 min drain with valve held → valve closed, cycle complete, reservoir 64 % → 52 % (placeholder scale). Lights on/off via lighting service verified. Then Fan 2 observed running with relay 3 off (see open item 1); everything switched off, parked for the night.
 

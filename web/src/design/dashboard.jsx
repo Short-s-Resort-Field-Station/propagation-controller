@@ -67,7 +67,7 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, loc
           </div>
         </div>
         <div className="panel" style={{alignSelf:'start'}}>
-          <div className="ph"><div className="pt">Reservoir</div><div className="pm">26.5 L Tank · 7 gal</div></div>
+          <div className="ph"><div className="pt">Reservoir</div><div className="pm">{PG.TANK_L} L Tank · {Math.round(PG.TANK_L/3.785)} gal</div></div>
           <div className="pb">
             <div style={{display:'flex',alignItems:'flex-end',gap:14}}>
               <div style={{flex:'none',width:64,height:130,border:'1px solid var(--ink)',borderRadius:3,background:'var(--bone)',position:'relative',overflow:'hidden'}}>
@@ -106,8 +106,7 @@ function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
       <div className="sc-top">
         <div className="sc-no">{s.n}<small>SHELF</small></div>
         <div className="sc-sp">
-          <div className="nm">{s.species}</div>
-          <div className="lt">{s.tag}</div>
+          <div className="nm">{s.species}{s.latin ? <em className="lat"> {s.latin}</em> : null}</div>
           <div className="sc-badge" style={{color:meta.inkCol}}>{s.status}</div>
         </div>
       </div>

@@ -54,6 +54,9 @@ func servePage(dist fs.FS, name string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// The kiosk runs for weeks; make sure a deploy's new asset hashes are
+		// picked up on the next load rather than a heuristically cached page.
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(body)
 	}
 }

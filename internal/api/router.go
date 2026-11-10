@@ -25,6 +25,7 @@ type Server struct {
 	sensors      *sensors.Service
 	safety       *safety.Supervisor
 	irrigation   *irrigation.Engine
+	powerOff     func() error
 	lighting     *lighting.Service
 	auth         *auth.Service
 	bus          *bus.Hub
@@ -52,6 +53,9 @@ type Deps struct {
 	Safety     *safety.Supervisor
 	Irrigation *irrigation.Engine
 	Lighting   *lighting.Service
+	// PowerOff powers the controller down after the unit is made safe (nil =
+	// log only, e.g. simulation).
+	PowerOff   func() error
 	Auth       *auth.Service
 	Bus        *bus.Hub
 	Moisture   *storage.MoistureRuleRepo
@@ -77,6 +81,7 @@ func NewRouter(d Deps) http.Handler {
 		safety:       d.Safety,
 		irrigation:   d.Irrigation,
 		lighting:     d.Lighting,
+		powerOff:     d.PowerOff,
 		auth:         d.Auth,
 		bus:          d.Bus,
 		moisture:     d.Moisture,
@@ -121,6 +126,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/relays/{channel}", s.handleGetRelay)
 		r.Post("/relays/{channel}/set", s.handleSetRelay)
 		r.Post("/relays/all-off", s.handleAllOff)
+		r.Post("/system/shutdown", s.handleSystemShutdown)
 
 		r.Get("/devices", s.handleListDevices)
 

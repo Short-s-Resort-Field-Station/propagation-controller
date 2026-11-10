@@ -200,7 +200,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
           <div className="fx-field">
             <div className="fx-k">Specimen · native catalog</div>
             <select className="fx-select" value={i} onChange={e=>pick(+e.target.value)}>
-              {cat.map((s,k)=><option key={k} value={k}>{s.species}</option>)}
+              {cat.map((s,k)=><option key={k} value={k}>{s.species} — {s.latin || s.tag}</option>)}
             </select>
             <div className="fx-latin"><em style={{textTransform:'capitalize'}}>{sp.tag.toLowerCase()}</em> &middot; {sp.hab}</div>
           </div>
@@ -208,7 +208,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
             <div className="fx-k">Second specimen · optional</div>
             <select className="fx-select" value={j} onChange={e=>setJ(+e.target.value)}>
               <option value={-1}>None — single specimen</option>
-              {cat.map((s,k)=><option key={k} value={k}>{s.species}</option>)}
+              {cat.map((s,k)=><option key={k} value={k}>{s.species} — {s.latin || s.tag}</option>)}
             </select>
             {sp2 && <div className="fx-latin"><em style={{textTransform:'capitalize'}}>{sp2.tag.toLowerCase()}</em> &middot; shares the shelf's watering &amp; band</div>}
           </div>

@@ -14,11 +14,13 @@ type Config struct {
 	ListenAddr string
 	DataDir    string
 	Simulation bool
-	RelayPort  string
-	ModbusPort string
-	ModbusBaud int
-	LogLevel   string
-	LogPretty  bool
+	// PowerOffCmd is what the touch-screen shutdown runs once the unit is safe.
+	PowerOffCmd string
+	RelayPort   string
+	ModbusPort  string
+	ModbusBaud  int
+	LogLevel    string
+	LogPretty   bool
 }
 
 func Load() Config {
@@ -31,6 +33,7 @@ func Load() Config {
 	// The ZTS-3000 soil probes ship at 4800 baud (verified against the real
 	// sensor 2026-07-10) — a 9600 default would show them as silently offline.
 	flag.IntVar(&c.ModbusBaud, "modbus-baud", envIntOr("PROPAGATION_MODBUS_BAUD", 9600), "Modbus RTU baud rate (bus runs at the level transmitter's factory 9600; soil probes set to match)")
+	flag.StringVar(&c.PowerOffCmd, "poweroff-cmd", envOr("PROPAGATION_POWEROFF_CMD", "sudo -n /usr/bin/systemctl poweroff"), "command run by POST /system/shutdown after relays are off (needs a sudoers rule; see deploy/sudoers)")
 	flag.StringVar(&c.LogLevel, "log-level", envOr("PROPAGATION_LOG_LEVEL", "info"), "log level: debug|info|warn|error")
 	flag.BoolVar(&c.LogPretty, "log-pretty", envBool("PROPAGATION_LOG_PRETTY"), "human-readable console logs instead of JSON")
 	flag.Parse()

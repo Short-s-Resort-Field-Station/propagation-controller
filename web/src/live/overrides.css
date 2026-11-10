@@ -187,3 +187,16 @@
 /* 3.3: e-stop control + banner. */
 .db-estop { border-color: var(--oxblood) !important; color: var(--oxblood) !important; font-weight: 700; }
 .db-estop.active { background: var(--oxblood) !important; color: var(--bone) !important; }
+
+/* Hidden power-down (2026-11-10): the divider is the long-press target; the
+   popup reuses the confirm-overlay look. */
+.rk2-hold { cursor: default; user-select: none; -webkit-user-select: none; touch-action: none; padding: 6px 0; margin: -6px 0; }
+.rk2-power { position: absolute; inset: 0; background: #0b0f0dcc; display: flex; align-items: center; justify-content: center; z-index: 40; }
+
+/* Species names (Austin, 2026-11-10): common name, then the Latin name in
+   italics right after it, everywhere a specimen is named. */
+.scard .sc-sp .nm .lat { font-style: italic; font-weight: 400; opacity: .85; }
+.rk2-plate .nm { font-style: normal; }
+.rk2-plate .nm .lat { font-style: italic; font-size: .78em; }
+.rk2-lrow .sp em { font-style: italic; text-transform: none; }
+.rk2-detail .tg em { font-style: italic; text-transform: none; letter-spacing: 0; }

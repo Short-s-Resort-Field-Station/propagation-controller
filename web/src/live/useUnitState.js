@@ -215,6 +215,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
       fans: (on) => run('Fans', api.setRelay(FANS_RELAY, on ? 'on' : 'off', surface, 'circulation fans')),
       // Audit 3.3: emergency stop + reset (dashboard, Grower+).
       emergencyStop: () => run('E-stop', api.emergencyStop(surface)),
+      shutdown: () => run('Shut down', api.shutdown(surface)),
       safetyReset: () => run('Reset safety', api.safetyReset(surface)),
       // change 2 (maintenance): system-wide suspend of irrigation automation.
       setMaintenance: (active) => run('Maintenance', api.setMaintenance(active)),
