@@ -1,9 +1,9 @@
 // pgui-controls.jsx — the Controls tab: the whole rack from one screen.
 //
-// Moisture bounds are the probe's full 0–100 % — a cactus shelf is allowed
-// to sit at zero; the only rule is re-arm above trigger (the backend's).
-// Three rack-wide panels (watering automation, lighting, fans) and one
-// per-shelf panel (moisture rule + soak/drain + manual water/drain/stop).
+// Three rack-wide panels (watering automation, lighting, fans) and a row of
+// per-shelf action buttons (water now / drain / stop). Single source of
+// truth: every rack-wide setting lives here and nowhere else; every
+// per-shelf setting lives in Shelf Management's edit modal and nowhere else.
 // With a `controls` bridge (the live build, main-dashboard.jsx) every field
 // loads from the daemon and every button hits the API; without it the tab
 // runs on an in-memory demo bridge so the handoff figure still works.
@@ -18,18 +18,6 @@ const fmtClockIso = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : p
 const validHHMM = (v) => /^\d\d:\d\d$/.test(v || '');
 
 // ---------- small parts ----------
-
-function Slider({ label, sub, value, min, max, step = 1, unit, onChange, disabled }){
-  return (
-    <div className="ctrl-row">
-      <div className="cl">{label}{sub && <small>{sub}</small>}</div>
-      <div style={{display:'flex',alignItems:'center',gap:16}}>
-        <input className="rng" type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/>
-        <div className="cv">{value}<span>{unit}</span></div>
-      </div>
-    </div>
-  );
-}
 
 function TimeRow({ label, sub, value, onChange, disabled }){
   return (
@@ -165,65 +153,36 @@ function AutomationPanel({ form, live, canEdit, onSave, onSetAutomation, onSetMa
   );
 }
 
-// ---------- per-shelf panel ----------
+// ---------- per-shelf actions ----------
+// Actions only. A shelf's settings (band, soak, drain, gap, cap, species)
+// are edited in one place — Shelf Management's edit modal — never here.
 
-function ShelfPanel({ list, shelf, setShelf, form, canEdit, canManual, onApply, onWater, onDrain, onStop }){
-  const [scope, setScope] = React.useState('this');
-  const [confirm, setConfirm] = React.useState(null); // 'apply' | 'water'
-  const cur = list.find(x=>x.n===shelf) || {};
-  const v = form.v;
-  const valid = v.rearm > v.trigger && v.durMin >= 1 && v.coolH >= 1 && v.maxCycles >= 1;
-  const cycle = cur.cycle ? `${cur.cycle.state} · ${Math.round((cur.cycle.duration||0)/60)} min` : null;
-  const soakTotal = v.durMin + v.drainMin;
+function ShelfActions({ list, canManual, onWater, onDrain, onStop }){
+  const [confirm, setConfirm] = React.useState(null); // shelf n
+  const rows = list.filter(x=>x.active || x.assigned);
+  const target = rows.find(x=>x.n===confirm);
   return (
     <div className="panel">
-      <div className="ph">
-        <div className="pt">Shelf {shelf}{cur.species ? <span className="ctrl-sp"> · {cur.species}</span> : null}</div>
-        <div className="seg ctrl-shelfseg">
-          {list.map(x=>(<button key={x.n} className={x.n===shelf?'on':''} onClick={()=>setShelf(x.n)}>{x.n}</button>))}
-        </div>
-      </div>
-      <div className="pb">
-        <div className="ctrl-grid2">
-          <div>
-            <Slider label="Water below" sub="Soak triggers under this probe reading" value={v.trigger} min={0} max={100} unit="%" onChange={x=>form.set('trigger',x)} disabled={!canEdit}/>
-            <Slider label="Re-arm above" sub="Shelf may trigger again once it reads this" value={v.rearm} min={0} max={100} unit="%" onChange={x=>form.set('rearm',x)} disabled={!canEdit}/>
-            <Slider label="Soak" sub="Pump runs the whole time" value={v.durMin} min={1} max={30} unit="min" onChange={x=>form.set('durMin',x)} disabled={!canEdit}/>
-            <Slider label="Drain back" sub="Valve held open after the pump stops" value={v.drainMin} min={0} max={60} unit="min" onChange={x=>form.set('drainMin',x)} disabled={!canEdit}/>
-          </div>
-          <div>
-            <Slider label="Minimum gap" sub="Rest between soaks" value={v.coolH} min={1} max={72} unit="h" onChange={x=>form.set('coolH',x)} disabled={!canEdit}/>
-            <Slider label="Soaks per day" sub="Rolling 24 h cap" value={v.maxCycles} min={1} max={6} unit="/day" onChange={x=>form.set('maxCycles',x)} disabled={!canEdit}/>
-            <div className="ctrl-row"><div className="cl">Full cycle<small>Soak + drain, one shelf at a time</small></div><div className="cv">{soakTotal}<span>min</span></div></div>
-            <div className="ctrl-row">
-              <div className="cl">Now<small>{cycle || (cur.probe ? `Probe ${cur.moisture}% · ${cur.status || ''}` : (cur.status || 'No probe reading'))}</small></div>
+      <div className="ph"><div className="pt">Shelves</div><div className="pm">Water by hand · settings live in Shelf Management</div></div>
+      <div className="pb" style={{paddingTop:4,paddingBottom:4}}>
+        {rows.length===0 && <div className="ctrl-note">No shelf assigned yet.</div>}
+        {rows.map(x=>{
+          const now = x.cycle ? `${x.cycle.state} · ${Math.round((x.cycle.duration||0)/60)} min` : (x.probe ? `Probe ${x.moisture}%` : 'No probe reading');
+          return (
+            <div className="ctrl-row" key={x.n}>
+              <div className="cl"><b className="ctrl-shelfno">{x.n}</b> {x.species || 'Unassigned'}{x.latin ? <em className="ctrl-sp"> {x.latin}</em> : null}<small>{now}{x.status ? ' · '+x.status : ''}{!x.active ? ' · disabled' : ''}</small></div>
               <div className="ctrl-btns">
-                <button className="fx-btn" disabled={!canManual || !!cur.cycle} onClick={()=>setConfirm('water')}>Water now</button>
-                <button className="fx-btn" disabled={!canManual || !!cur.cycle} onClick={()=>onDrain(shelf)}>Drain</button>
-                <button className="fx-btn danger" disabled={!canManual || !cur.cycle} onClick={()=>onStop(shelf)}>Stop</button>
+                <button className="fx-btn" disabled={!canManual || !!x.cycle || !x.active} onClick={()=>setConfirm(x.n)}>Water now</button>
+                <button className="fx-btn" disabled={!canManual || !!x.cycle || !x.active} onClick={()=>onDrain(x.n)}>Drain</button>
+                <button className="fx-btn danger" disabled={!canManual || !x.cycle} onClick={()=>onStop(x.n)}>Stop</button>
               </div>
             </div>
-          </div>
-        </div>
-        {v.rearm <= v.trigger && <div className="fx-warn">Re-arm must be above the trigger</div>}
-        <div className="apply-bar">
-          <span className="mono ctrl-k">Apply to</span>
-          <div className="seg">
-            <button className={scope==='this'?'on':''} onClick={()=>setScope('this')} disabled={!canEdit}>Shelf {shelf}</button>
-            <button className={scope==='all'?'on':''} onClick={()=>setScope('all')} disabled={!canEdit}>All shelves</button>
-          </div>
-          {form.err && <span className="fx-warn">{form.err}</span>}
-          <button className="fx-btn primary" style={{marginLeft:'auto'}} disabled={!canEdit||!form.dirty||!valid||form.saving} onClick={()=>setConfirm('apply')}>
-            {form.saving ? 'Saving…' : form.saved ? 'Saved ✓' : 'Review & Apply'}
-          </button>
-        </div>
+          );
+        })}
       </div>
-      {confirm==='apply' && <Confirm title="Apply shelf rule"
-        body={`Apply to ${scope==='all' ? 'all shelves' : 'Shelf '+shelf}: water below ${v.trigger}%, re-arm above ${v.rearm}%, ${v.durMin} min soak with the pump running, ${v.drainMin} min drain back, at least ${v.coolH} h between soaks, at most ${v.maxCycles} per day.`}
-        confirmLabel="Apply" onCancel={()=>setConfirm(null)} onConfirm={()=>{ setConfirm(null); onApply(scope, shelf, form); }}/>}
-      {confirm==='water' && <Confirm title={`Water Shelf ${shelf} now`}
-        body={`Run a full ${v.durMin} min soak on Shelf ${shelf} with the pump on, then drain back for ${v.drainMin} min? It runs now, outside the watering window.`}
-        confirmLabel="Water now" onCancel={()=>setConfirm(null)} onConfirm={()=>{ setConfirm(null); onWater(shelf); }}/>}
+      {target && <Confirm title={`Water Shelf ${target.n} now`}
+        body={`Run a full soak on Shelf ${target.n}${target.durMin ? ` — ${target.durMin} min with the pump on, then ${target.drainMin||0} min drain back` : ''}? It runs now, outside the watering window, one shelf at a time.`}
+        confirmLabel="Water now" onCancel={()=>setConfirm(null)} onConfirm={()=>{ const n=target.n; setConfirm(null); onWater(n); }}/>}
     </div>
   );
 }
@@ -239,10 +198,8 @@ function useDemoControls(){
   const [, bump] = React.useState(0);
   const s = store.current;
   return React.useMemo(()=>({
-    list: [{n:'01',species:'Bald Cypress',active:true,probe:true,moisture:20,status:'Healthy'},{n:'02',species:'Buttonbush',active:true,probe:true,moisture:18,status:'Monitoring'},{n:'03',species:'Texas Mountain Laurel',active:true,probe:true,moisture:19,status:'Healthy'}],
+    list: [{n:'01',species:'Bald Cypress',active:true,probe:true,moisture:20,status:'Healthy',durMin:17,drainMin:10},{n:'02',species:'Buttonbush',active:true,probe:true,moisture:18,status:'Monitoring',durMin:17,drainMin:10},{n:'03',species:'Texas Mountain Laurel',active:true,probe:true,moisture:19,status:'Healthy',durMin:17,drainMin:10}],
     live: s.live,
-    loadShelf: async (n)=> s.rules[n] || { trigger:16, rearm:24, durMin:17, drainMin:10, coolH:12, maxCycles:1 },
-    applyShelf: async (scope, n, irr)=>{ (scope==='all'?['01','02','03']:[n]).forEach(k=>{ s.rules[k]={...irr}; }); },
     loadRack: async ()=>({ lights:s.lights, fans:s.fans, window:s.window, minReservoir:s.minReservoir }),
     applyRack: async (p)=>{ Object.assign(s, p); if(p.window!==undefined) s.live.automation={...s.live.automation, window:p.window}; bump(x=>x+1); },
     manualLight: (m)=>{ s.live.lightOverride = m==='auto'?null:{mode:m,until:null}; s.live.lightOn = m==='on'; bump(x=>x+1); },
@@ -266,9 +223,7 @@ function ControlsTab({ role, controls }){
   const lights = useForm({ enabled:true, on:'07:30', off:'17:05' });
   const fans = useForm({ enabled:true, on:'13:30', off:'15:00' });
   const auto = useForm({ start:'', end:'', minReservoir:20 });
-  const shelfList = c.list && c.list.length ? c.list : [{n:'01'},{n:'02'},{n:'03'}];
-  const [shelf, setShelf] = React.useState(shelfList[0].n);
-  const rule = useForm({ trigger:16, rearm:24, durMin:17, drainMin:10, coolH:12, maxCycles:1 });
+  const shelfList = c.list || [];
 
   // Rack-wide values load once (and again after a save), never while editing.
   const loadRack = React.useCallback(()=>{
@@ -282,28 +237,20 @@ function ControlsTab({ role, controls }){
   }, [c]);
   React.useEffect(()=>{ loadRack(); }, [loadRack]);
 
-  React.useEffect(()=>{
-    let alive = true;
-    c.loadShelf(shelf).then(p=>{ if(alive && p) rule.load(p); }).catch(()=>{});
-    return ()=>{ alive=false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shelf, c]);
-
   const saveSched = (which) => (form) => form.save(v => c.applyRack({ [which]: { enabled: v.enabled, on: v.on, off: v.off } }));
   const saveAuto = (form) => form.save(v => c.applyRack({
     window: (v.start && v.end) ? { start: v.start, end: v.end } : { start:'', end:'' },
     minReservoir: v.minReservoir,
   }));
-  const applyShelf = (scope, n, form) => form.save(v => c.applyShelf(scope, n, v));
 
   return (
     <div>
       <div className="db-h">
         <div className="ttl">Rack Controls</div>
-        <div className="sub">Schedules, automation and every shelf, from here</div>
+        <div className="sub">Rack-wide schedules and automation · water a shelf by hand</div>
       </div>
-      {readonly && <div className="ro-note">Read-only — sign in as a Grower to run things by hand, or as a Steward to change schedules and rules.</div>}
-      {!readonly && !canEdit && <div className="ro-note">Grower: manual controls are live. Schedules, rules and settings need a Steward.</div>}
+      {readonly && <div className="ro-note">Read-only — sign in as a Grower to run things by hand, or as a Steward to change schedules and settings.</div>}
+      {!readonly && !canEdit && <div className="ro-note">Grower: manual controls are live. Schedules and settings need a Steward.</div>}
       <div className="ctrl-grid3">
         <AutomationPanel form={auto} live={live} canEdit={canEdit} onSave={saveAuto}
           onSetAutomation={c.setAutomation} onSetMaintenance={c.setMaintenance}/>
@@ -312,8 +259,7 @@ function ControlsTab({ role, controls }){
         <SchedulePanel title="Circulation fans" what="Fans" form={fans} live={{on:live.fanOn, override:live.fanOverride}}
           canEdit={canEdit} canManual={canManual} onManual={c.manualFan} onSave={saveSched('fans')}/>
       </div>
-      <ShelfPanel list={shelfList} shelf={shelf} setShelf={setShelf} form={rule} canEdit={canEdit} canManual={canManual}
-        onApply={applyShelf} onWater={c.water} onDrain={c.drain} onStop={c.stop}/>
+      <ShelfActions list={shelfList} canManual={canManual} onWater={c.water} onDrain={c.drain} onStop={c.stop}/>
     </div>
   );
 }

@@ -106,9 +106,6 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
   const [durMin,setDurMin] = React.useState(initial && initial.durMin ? initial.durMin : 5);
   // live-edit (ebb-flow): drain-back time — valve holds open after the pump stops.
   const [drainMin,setDrainMin] = React.useState(initial && initial.drainMin!=null ? initial.drainMin : 5);
-  const [onH,setOnH] = React.useState(initial && initial.onH!=null ? initial.onH : sp.onH);
-  const [lightHrs,setLightHrs] = React.useState(
-    initial && initial.lightHrs!=null ? initial.lightHrs : Math.max(1,(sp.offH-sp.onH+24)%24));
   // change 3: monitoring-only EC / temperature happy-bands + carried moisture
   // guards (cooldown / daily cap) so a saved profile round-trips fully.
   const [ecLo,setEcLo] = React.useState(initial && initial.ecLo!=null ? initial.ecLo : sp.ecLo);
@@ -151,12 +148,11 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
   const onPickProfile = (id)=>{ if(!id){ setProfId(0); return; } const p=profList.find(x=>x.id===id); if(p) applyProfile(p); };
   const onPickStage = (v)=>{ if(v==='__custom'){ setCustomStage(true); } else { setCustomStage(false); setStage(v); } };
 
-  const pick = k => { const s=cat[k]; setI(k); setLo(s.lo); setHi(s.hi); setOnH(s.onH); setLightHrs(Math.max(1,(s.offH-s.onH+24)%24));
+  const pick = k => { const s=cat[k]; setI(k); setLo(s.lo); setHi(s.hi);
     setEcLo(s.ecLo); setEcHi(s.ecHi); setTempLo(s.tempLo); setTempHi(s.tempHi); setProfId(0); };
 
   const bandOk = lo < hi, ecOk = ecLo < ecHi, tempOk = tempLo < tempHi;
   const allOk = bandOk && ecOk && tempOk;
-  const offH = (onH+lightHrs)%24;
   const editing = !!initial;
   const appliedProf = profList.find(p=>p.id===profId);
 
@@ -186,7 +182,6 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
       moisture:Math.round((lo+hi)/2), lo, hi, durMin, drainMin,
       ecLo, ecHi, tempLo, tempHi, minIntervalMin:coolMin, maxCycles,
       speciesId: sp.id, profileId: appliedProf?appliedProf.id:0, profileName: appliedProf?appliedProf.name:'', stage,
-      light:true, on:fmtH(onH), off:fmtH(offH),
       lastWater:'—', usage:'—', status:'Healthy', stripe:sp.stripe });
   };
   return (
@@ -284,14 +279,10 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
         </div>
         <div className="asg-hint" style={{marginTop:12}}>The unit monitors substrate EC &amp; root zone temperature but doesn’t control them — these bands drive the gauges and the time-in-target tracking.</div>
 
-        {/* ── LIGHTING ───────────────────────────────────────── */}
-        <div className="asg-sec">Lighting · rack-wide photoperiod</div>
-        <div style={{display:'flex',alignItems:'flex-end',gap:'26px',marginBottom:'14px'}}>
-          <div><div className="fx-k" style={{marginBottom:'6px'}}>Lights on at</div><NumField v={onH} set={setOnH} min={0} max={23} unit=":00"/></div>
-          <div><div className="fx-k" style={{marginBottom:'6px'}}>Hours of light</div><NumField v={lightHrs} set={setLightHrs} min={1} max={23} unit="h"/></div>
-          <div style={{marginLeft:'auto',fontFamily:'Zilla Slab',fontWeight:900,fontSize:'22px'}}>{fmtH(onH)}–{fmtH(offH)}<span style={{fontSize:'12px',color:'var(--char)'}}> on–off</span></div>
-        </div>
-        <PhotoRail onH={onH} hours={lightHrs}/>
+        {/* Lighting and fans are rack-wide and live on the Controls tab —
+            a shelf never carries a copy of them (single source of truth,
+            Austin 2026-11-10). */}
+        <div className="asg-hint" style={{marginTop:14}}>Lighting and circulation fans are rack-wide. Their schedules live on the Controls tab.</div>
       </div>
       <div className="fx-foot">
         {/* change 2: clearing the bay auto-disables sensors + valve; disable

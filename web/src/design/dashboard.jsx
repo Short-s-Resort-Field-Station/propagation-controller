@@ -308,7 +308,6 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
 // Deep-linkable tabs: "/#environmental", "/#controls", "/#shelves".
 // Build AssignModal initial values from a live shelf (quick-edit).
 function editInitial(s){
-  const onH = parseInt(s.on, 10), offH = parseInt(s.off, 10);
   const raw = s.raw || {};
   return {
     species: raw.species1 || s.species,
@@ -321,8 +320,6 @@ function editInitial(s){
     ecLo: raw.ecLo, ecHi: raw.ecHi, tempLo: raw.tempLo, tempHi: raw.tempHi,
     profileId: raw.profileId, stage: raw.stage,
     coolMin: raw.coolMin, maxCycles: raw.maxCycles,
-    onH: isNaN(onH) ? 6 : onH,
-    lightHrs: (!isNaN(onH) && !isNaN(offH)) ? (((offH - onH + 24) % 24) || 13) : 13,
   };
 }
 

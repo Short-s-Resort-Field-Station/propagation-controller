@@ -11,13 +11,14 @@ import { LIGHT_OVERRIDE_MIN } from './live/useUnitState.js';
 import { LiveSignInModal, SetupModal, OperatorsModal, toDesignSession } from './live/auth-ui.jsx';
 
 // Live Controls-tab bridge (design/controls.jsx): rack-wide schedules and
-// settings, per-shelf rules, and the manual buttons — all through the API.
+// settings plus the per-shelf action buttons. Per-shelf settings live only
+// in Shelf Management's edit modal (single source of truth).
 function makeControls(state, actions) {
   const list = state.shelves.map((s) => ({
-    n: s.n, zoneKey: s.zoneKey, species: s.species, latin: s.latin, active: s.active,
+    n: s.n, zoneKey: s.zoneKey, species: s.species, latin: s.latin, active: s.active, assigned: s.assigned,
     status: s.status, cycle: s.cycle, moisture: s.moisture, probe: s.probe,
+    durMin: (s.raw && s.raw.durMin) || 0, drainMin: (s.raw && s.raw.drainMin) || 0,
   }));
-  const zoneFor = (n) => (list.find((x) => x.n === n) || {}).zoneKey || 'zone_' + Number(n);
   const sched = (sch) => (sch ? { enabled: !!sch.enabled, on: sch.on_time, off: sch.off_time, timezone: sch.timezone, days: sch.days } : null);
 
   return {
@@ -31,43 +32,6 @@ function makeControls(state, actions) {
       automation: state.automation,
       lockouts: state.lockouts,
       reservoir: state.reservoir,
-    },
-    loadShelf: async (n) => {
-      const zoneKey = zoneFor(n);
-      const [mc, zonesResp] = await Promise.all([
-        api.moistureControl(zoneKey).catch(() => null),
-        api.zones().catch(() => null),
-      ]);
-      const rule = mc && mc.trigger_below != null ? mc : null;
-      const zone = zonesResp && (zonesResp.zones || []).find((z) => z.zone_key === zoneKey);
-      const cfg = (zone && zone.config) || {};
-      return {
-        trigger: rule ? Math.round(rule.trigger_below) : 16,
-        rearm: rule ? Math.round(rule.recovered_above ?? rule.trigger_below + 8) : 24,
-        durMin: rule ? Math.max(1, Math.round(rule.run_duration_seconds / 60)) : Math.max(1, Math.round((cfg.default_run_seconds || 1020) / 60)),
-        drainMin: Math.max(0, Math.round((cfg.drain_seconds ?? 600) / 60)),
-        coolH: rule ? Math.max(1, Math.round(rule.minimum_interval_minutes / 60)) : 12,
-        maxCycles: rule && rule.max_cycles_per_day != null ? rule.max_cycles_per_day : 1,
-      };
-    },
-    applyShelf: async (scope, n, irr) => {
-      const targets = scope === 'all' ? list.map((x) => x.zoneKey) : [zoneFor(n)];
-      for (const zoneKey of targets) {
-        const existing = await api.moistureControl(zoneKey).catch(() => null);
-        const rule = existing && existing.trigger_below != null ? existing : null;
-        await api.patchZone(zoneKey, { drain_seconds: irr.drainMin * 60, default_run_seconds: irr.durMin * 60 });
-        await api.putMoistureControl(zoneKey, {
-          enabled: rule ? rule.enabled : true,
-          sensor_key: (rule && rule.sensor_key) || `soil_${zoneKey}_moisture`,
-          trigger_below: irr.trigger,
-          recovered_above: irr.rearm,
-          run_duration_seconds: irr.durMin * 60,
-          minimum_interval_minutes: irr.coolH * 60,
-          max_cycles_per_day: irr.maxCycles,
-          sensor_offline_behavior: (rule && rule.sensor_offline_behavior) || 'lockout',
-        });
-      }
-      await actions.refresh();
     },
     loadRack: async () => {
       const [lights, fans, settings] = await Promise.all([

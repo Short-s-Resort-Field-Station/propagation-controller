@@ -289,17 +289,6 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
             // The assignment stands; the band simply isn't enforced yet.
             toast(`Moisture rule: ${e.message}`);
           });
-          // Photoperiod from the modal is rack-wide (one lighting circuit).
-          if (fields.on && fields.off && fields.on !== '—') {
-            const sch = await api.lightingSchedule().catch(() => null);
-            await api.putLightingSchedule({
-              enabled: true,
-              timezone: (sch && sch.timezone) || 'America/Chicago',
-              on_time: fields.on,
-              off_time: fields.off,
-              days: (sch && sch.days) || [],
-            }).catch((e) => toast(`Photoperiod: ${e.message}`));
-          }
           // Rules are cached; force them to reload with the next refresh.
           tickRef.current = 0;
           await refresh();
