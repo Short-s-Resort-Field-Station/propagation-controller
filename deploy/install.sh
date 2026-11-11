@@ -18,7 +18,8 @@ chown -R propagation:propagation /var/lib/propagation-controller
 install -m 644 systemd/propagationd.service /etc/systemd/system/
 [ -f /opt/propagation-controller/propagation-watchdog ] && install -m 644 systemd/propagation-watchdog.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now propagationd
+systemctl enable propagationd
+systemctl restart propagationd   # restart, not enable --now: an upgrade must swap the running binary
 [ -f /etc/systemd/system/propagation-watchdog.service ] && systemctl enable --now propagation-watchdog
 
 echo "== Done. Health: curl http://localhost/api/v1/health =="
