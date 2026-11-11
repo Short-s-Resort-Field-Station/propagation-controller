@@ -99,9 +99,13 @@ func (s *Service) EnsureDefaults() error {
 		key, name, typ string
 		cfg            Config
 	}{
-		// ZTS-3000 probes at 11-13 (shelf + 10) @ 9600; see docs/AS-BUILT.md.
-		{"soil_zone_1", "Soil Sensor Shelf 1", "soil_sensor", soil(11)},
-		{"soil_zone_2", "Soil Sensor Shelf 2", "soil_sensor", soil(12)},
+		// ZTS-3000 probes at 11-13 @ 9600; see docs/AS-BUILT.md. Addresses are
+		// NOT shelf + 10: Austin swapped the cable-"1" (addr 11) and cable-"2"
+		// (addr 12) probes between shelves 1 and 2 for cord length on
+		// 2026-11-10, and the live DB was patched to match. Keys stay per
+		// shelf so moisture rules (soil_zone_N_moisture) never move.
+		{"soil_zone_1", "Soil Sensor Shelf 1", "soil_sensor", soil(12)},
+		{"soil_zone_2", "Soil Sensor Shelf 2", "soil_sensor", soil(11)},
 		{"soil_zone_3", "Soil Sensor Shelf 3", "soil_sensor", soil(13)},
 		{"reservoir_level", "Reservoir Level", "reservoir_sensor", reservoir},
 	} {
