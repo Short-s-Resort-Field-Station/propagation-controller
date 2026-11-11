@@ -197,3 +197,33 @@ func TestOverrideSurvivesRestart(t *testing.T) {
 		t.Error("expired override switched the lights on")
 	}
 }
+
+// The fan instance must drive the fan relay and keep its own schedule and
+// override rows, never touching the lights' (Austin 2026-11-10: fans on a
+// schedule like the lights).
+func TestFanServiceUsesOwnRelayAndRows(t *testing.T) {
+	svc, _, ctx := newTestService(t)
+	fans := NewFanService(svc.mgr, svc.safety, svc.schedules, svc.settings, svc.events, zerolog.Nop(), 20*time.Millisecond)
+	if err := fans.EnsureDefault("America/Chicago"); err != nil {
+		t.Fatalf("seed fan schedule: %v", err)
+	}
+	row, _ := svc.schedules.GetByKey(FanScheduleKey)
+	if row == nil || row.Type != "fans" {
+		t.Fatalf("fan schedule row missing or wrong type: %+v", row)
+	}
+	if err := fans.SetOverride(ctx, "on", "api", 0); err != nil {
+		t.Fatalf("fan override: %v", err)
+	}
+	if info, _ := svc.mgr.GetRelay(ctx, devices.FansChannel); info.State != relay.On {
+		t.Fatalf("fan relay = %s, want on", info.State)
+	}
+	if info, _ := svc.mgr.GetRelay(ctx, devices.LightsChannel); info.State == relay.On {
+		t.Fatalf("lights relay turned on by the fan service")
+	}
+	if _, ok, _ := svc.settings.Get(FanOverrideKey); !ok {
+		t.Fatalf("fan override not persisted under %s", FanOverrideKey)
+	}
+	if raw, ok, _ := svc.settings.Get(overrideKey); ok && raw != "null" {
+		t.Fatalf("lighting override row touched by the fan service: %s", raw)
+	}
+}

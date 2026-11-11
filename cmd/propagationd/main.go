@@ -152,6 +152,11 @@ func main() {
 		log.Error().Err(err).Msg("failed to seed lighting schedule")
 	}
 	lightSvc.Start(ctx)
+	fanSvc := lighting.NewFanService(mgr, supervisor, scheduleRepo, settingsRepo, eventLog, log, 15*time.Second)
+	if err := fanSvc.EnsureDefault("America/Chicago"); err != nil {
+		log.Error().Err(err).Msg("failed to seed fan schedule")
+	}
+	fanSvc.Start(ctx)
 
 	moistureRepo := storage.NewMoistureRuleRepo(db)
 	autoSvc := automation.NewService(engine, zoneRepo, cycleRepo, moistureRepo, readingRepo,
@@ -170,6 +175,7 @@ func main() {
 		Safety:     supervisor,
 		Irrigation: engine,
 		Lighting:   lightSvc,
+		Fans:       fanSvc,
 		PowerOff:   powerOffFunc(cfg, log),
 		Auth:       authSvc,
 		Bus:        hub,

@@ -27,6 +27,7 @@ type Server struct {
 	irrigation   *irrigation.Engine
 	powerOff     func() error
 	lighting     *lighting.Service
+	fans         *lighting.Service
 	auth         *auth.Service
 	bus          *bus.Hub
 	moisture     *storage.MoistureRuleRepo
@@ -53,6 +54,7 @@ type Deps struct {
 	Safety     *safety.Supervisor
 	Irrigation *irrigation.Engine
 	Lighting   *lighting.Service
+	Fans       *lighting.Service
 	// PowerOff powers the controller down after the unit is made safe (nil =
 	// log only, e.g. simulation).
 	PowerOff   func() error
@@ -81,6 +83,7 @@ func NewRouter(d Deps) http.Handler {
 		safety:       d.Safety,
 		irrigation:   d.Irrigation,
 		lighting:     d.Lighting,
+		fans:         d.Fans,
 		powerOff:     d.PowerOff,
 		auth:         d.Auth,
 		bus:          d.Bus,
@@ -162,6 +165,13 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/lighting/override", s.handleLightingOverride)
 		r.Get("/lighting/schedule", s.handleGetLightingSchedule)
 		r.Put("/lighting/schedule", s.handlePutLightingSchedule)
+		// Circulation fans: same scheduler as the lights, own relay/rows.
+		r.Get("/fans/status", s.handleFanStatus)
+		r.Post("/fans/on", s.handleFanOn)
+		r.Post("/fans/off", s.handleFanOff)
+		r.Post("/fans/override", s.handleFanOverride)
+		r.Get("/fans/schedule", s.handleGetFanSchedule)
+		r.Put("/fans/schedule", s.handlePutFanSchedule)
 
 		r.Get("/species", s.handleListSpecies)
 		// change 3: species profiles CRUD (per-species, per-stage saved settings)

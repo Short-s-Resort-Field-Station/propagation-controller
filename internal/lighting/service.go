@@ -33,6 +33,12 @@ const scheduleKey = "lighting"
 // 2026-11-10, 2.11). Cleared overrides are stored as JSON null.
 const overrideKey = "lighting_override"
 
+// FanScheduleKey / FanOverrideKey are the fan instance's rows (see NewFanService).
+const (
+	FanScheduleKey = "fans"
+	FanOverrideKey = "fans_override"
+)
+
 // Rule is the schedules-table rule_json payload.
 type Rule struct {
 	OnTime  string   `json:"on_time"`        // "06:00"
@@ -73,6 +79,19 @@ type Override struct {
 }
 
 type Service struct {
+	// Which relay this instance drives and where it keeps its rows. The
+	// lighting instance uses LightsChannel / "lighting"; the circulation-fan
+	// instance (NewFanService, Austin 2026-11-10 "schedule them like the
+	// lights") uses FansChannel / "fans". Same loop, same override semantics.
+	channel      int
+	label        string // event-type prefix and log tag: "lighting" | "fans"
+	scheduleKey  string
+	scheduleName string
+	scheduleType string
+	overrideKey  string
+	defaultOn    string
+	defaultOff   string
+
 	mgr       *devices.Manager
 	safety    *safety.Supervisor
 	schedules *storage.ScheduleRepo
@@ -91,22 +110,42 @@ func NewService(mgr *devices.Manager, sup *safety.Supervisor, schedules *storage
 	if interval <= 0 {
 		interval = 15 * time.Second
 	}
-	return &Service{mgr: mgr, safety: sup, schedules: schedules, settings: settings,
+	return &Service{
+		channel: devices.LightsChannel, label: "lighting", scheduleKey: scheduleKey,
+		scheduleName: "Rack lighting photoperiod", scheduleType: "lighting", overrideKey: overrideKey,
+		defaultOn: "06:00", defaultOff: "19:30",
+		mgr: mgr, safety: sup, schedules: schedules, settings: settings,
 		events: events, log: log, interval: interval}
+}
+
+// NewFanService returns the same scheduler bound to the circulation fans
+// (relay FansChannel). Default seed is Austin's rule (2026-11-10): one
+// 90-minute run every afternoon, 13:30–15:00, while the lights are on.
+func NewFanService(mgr *devices.Manager, sup *safety.Supervisor, schedules *storage.ScheduleRepo,
+	settings *storage.SettingsRepo, events *logging.EventLogger, log zerolog.Logger, interval time.Duration) *Service {
+	svc := NewService(mgr, sup, schedules, settings, events, log, interval)
+	svc.channel = devices.FansChannel
+	svc.label = "fans"
+	svc.scheduleKey = FanScheduleKey
+	svc.scheduleName = "Circulation fan schedule"
+	svc.scheduleType = "fans"
+	svc.overrideKey = FanOverrideKey
+	svc.defaultOn, svc.defaultOff = "13:30", "15:00"
+	return svc
 }
 
 // EnsureDefault seeds the photoperiod schedule from the design handoff
 // (06:00–19:30 daily).
 func (s *Service) EnsureDefault(timezone string) error {
-	existing, err := s.schedules.GetByKey(scheduleKey)
+	existing, err := s.schedules.GetByKey(s.scheduleKey)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
 		return nil
 	}
-	rule, _ := json.Marshal(Rule{OnTime: "06:00", OffTime: "19:30"})
-	return s.schedules.Upsert(scheduleKey, "Rack lighting photoperiod", "lighting",
+	rule, _ := json.Marshal(Rule{OnTime: s.defaultOn, OffTime: s.defaultOff})
+	return s.schedules.Upsert(s.scheduleKey, s.scheduleName, s.scheduleType,
 		true, timezone, string(rule), "restore_current_expected_state")
 }
 
@@ -131,9 +170,9 @@ func (s *Service) Start(ctx context.Context) {
 // An override whose expiry passed while the daemon was down is dropped and
 // the schedule takes over on the first tick.
 func (s *Service) restoreOverride(ctx context.Context) {
-	raw, ok, err := s.settings.Get(overrideKey)
+	raw, ok, err := s.settings.Get(s.overrideKey)
 	if err != nil {
-		s.log.Error().Err(err).Msg("lighting: cannot read persisted override")
+		s.log.Error().Err(err).Msg(s.label + ": cannot read persisted override")
 		return
 	}
 	if !ok {
@@ -148,14 +187,14 @@ func (s *Service) restoreOverride(ctx context.Context) {
 	}
 	if o.Until != nil && time.Now().After(*o.Until) {
 		s.persistOverride(nil)
-		s.events.Info("lighting_override_expired", "lighting override expired during downtime; returning to schedule", o.Actor, nil)
+		s.events.Info(s.label+"_override_expired", s.label+" override expired during downtime; returning to schedule", o.Actor, nil)
 		return
 	}
 	s.mu.Lock()
 	s.override = o
 	s.mu.Unlock()
 	s.apply(ctx, o.Mode == "on", o.Actor, "manual lighting override restored after restart")
-	s.events.Info("lighting_override_restored", fmt.Sprintf("lighting override (%s) restored after restart", o.Mode),
+	s.events.Info(s.label+"_override_restored", fmt.Sprintf(s.label+" override (%s) restored after restart", o.Mode),
 		o.Actor, map[string]any{"until": o.Until})
 }
 
@@ -163,17 +202,17 @@ func (s *Service) restoreOverride(ctx context.Context) {
 func (s *Service) persistOverride(o *Override) {
 	body, err := json.Marshal(o)
 	if err == nil {
-		err = s.settings.Set(overrideKey, string(body))
+		err = s.settings.Set(s.overrideKey, string(body))
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("lighting: cannot persist override")
+		s.log.Error().Err(err).Msg(s.label + ": cannot persist override")
 	}
 }
 
 func (s *Service) tick(ctx context.Context) {
 	sch, err := s.loadSchedule()
 	if err != nil {
-		s.log.Error().Err(err).Msg("lighting: cannot load schedule")
+		s.log.Error().Err(err).Msg(s.label + ": cannot load schedule")
 		return
 	}
 
@@ -190,7 +229,7 @@ func (s *Service) tick(ctx context.Context) {
 		s.override = nil
 		s.mu.Unlock()
 		s.persistOverride(nil)
-		s.events.Info("lighting_override_expired", "lighting override expired; returning to schedule", actor, nil)
+		s.events.Info(s.label+"_override_expired", s.label+" override expired; returning to schedule", actor, nil)
 		s.mu.Lock()
 		if expected != nil {
 			exp := *expected
@@ -219,12 +258,12 @@ func (s *Service) apply(ctx context.Context, on bool, actor, reason string) {
 	if on {
 		state = relay.On
 	}
-	if err := s.safety.Authorize(devices.LightsChannel, state); err != nil {
-		s.log.Warn().Err(err).Msg("lighting: command blocked by safety")
+	if err := s.safety.Authorize(s.channel, state); err != nil {
+		s.log.Warn().Err(err).Msg(s.label + ": command blocked by safety")
 		return
 	}
-	if _, err := s.mgr.SetRelay(ctx, devices.LightsChannel, state, actor, reason, 0); err != nil {
-		s.events.Error("lighting_command_failed", "lighting relay command failed", actor,
+	if _, err := s.mgr.SetRelay(ctx, s.channel, state, actor, reason, 0); err != nil {
+		s.events.Error(s.label+"_command_failed", s.label+" relay command failed", actor,
 			map[string]any{"error": err.Error()})
 	}
 }
@@ -245,7 +284,7 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 		s.mu.Unlock()
 		s.persistOverride(o)
 		s.apply(ctx, mode == "on", actor, "manual lighting override")
-		s.events.Info("lighting_override", fmt.Sprintf("lighting manually forced %s", mode), actor,
+		s.events.Info(s.label+"_override", fmt.Sprintf(s.label+" manually forced %s", mode), actor,
 			map[string]any{"expires_minutes": expiresMinutes})
 		return nil
 	case "auto":
@@ -256,7 +295,7 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 		s.mu.Unlock()
 		if had {
 			s.persistOverride(nil)
-			s.events.Info("lighting_override_cleared", "lighting override cleared; returning to schedule", actor, nil)
+			s.events.Info(s.label+"_override_cleared", s.label+" override cleared; returning to schedule", actor, nil)
 		}
 		if expected != nil {
 			s.apply(ctx, *expected, "schedule", "override cleared")
@@ -276,7 +315,7 @@ type StatusView struct {
 
 func (s *Service) Status(ctx context.Context) StatusView {
 	view := StatusView{}
-	if info, err := s.mgr.GetRelay(ctx, devices.LightsChannel); err == nil {
+	if info, err := s.mgr.GetRelay(ctx, s.channel); err == nil {
 		view.RelayState = string(info.State)
 	} else {
 		view.RelayState = "unknown"
@@ -315,11 +354,11 @@ func (s *Service) PutSchedule(sch Schedule, actor string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.schedules.Upsert(scheduleKey, "Rack lighting photoperiod", "lighting",
+	if err := s.schedules.Upsert(s.scheduleKey, s.scheduleName, s.scheduleType,
 		sch.Enabled, sch.Timezone, string(rule), "restore_current_expected_state"); err != nil {
 		return err
 	}
-	s.events.Info("lighting_schedule_updated", "lighting schedule updated", actor,
+	s.events.Info(s.label+"_schedule_updated", s.label+" schedule updated", actor,
 		map[string]any{"on": sch.OnTime, "off": sch.OffTime, "enabled": sch.Enabled})
 	// Force re-evaluation on the next tick as a fresh transition.
 	s.mu.Lock()
@@ -329,7 +368,7 @@ func (s *Service) PutSchedule(sch Schedule, actor string) error {
 }
 
 func (s *Service) loadSchedule() (*Schedule, error) {
-	row, err := s.schedules.GetByKey(scheduleKey)
+	row, err := s.schedules.GetByKey(s.scheduleKey)
 	if err != nil || row == nil {
 		return nil, err
 	}
