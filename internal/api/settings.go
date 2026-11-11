@@ -3,9 +3,20 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"propagation-controller/internal/safety"
 )
+
+type wateringWindow struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type automationSetting struct {
+	Enabled        bool            `json:"enabled"`
+	WateringWindow *wateringWindow `json:"watering_window,omitempty"`
+}
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	all, err := s.settingsRepo.All()
@@ -84,20 +95,40 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			// Same shape check as maintenance: a typo'd value must not be
 			// stored, because the automation loop reads this key every tick
 			// and treats anything unreadable as disabled (audit 2.9).
-			var v struct {
-				Enabled bool `json:"enabled"`
-			}
+			// watering_window (optional) gates moisture-triggered soaks to a
+			// local-time window, e.g. {"start":"07:45","end":"11:00"}. The
+			// dashboard toggle only sends {"enabled": ...}, so an omitted
+			// window keeps the stored one; send {"start":"","end":""} to clear.
+			var v automationSetting
 			if err := json.Unmarshal(raw, &v); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid automation config: "+err.Error())
 				return
 			}
+			if v.WateringWindow != nil && v.WateringWindow.Start == "" && v.WateringWindow.End == "" {
+				v.WateringWindow = &wateringWindow{} // explicit clear
+			} else if v.WateringWindow != nil {
+				for _, t := range []string{v.WateringWindow.Start, v.WateringWindow.End} {
+					if _, err := time.Parse("15:04", t); err != nil {
+						writeError(w, http.StatusBadRequest, "invalid automation config: watering_window times must be HH:MM (24h)")
+						return
+					}
+				}
+				if v.WateringWindow.Start == v.WateringWindow.End {
+					writeError(w, http.StatusBadRequest, "invalid automation config: watering_window start and end must differ")
+					return
+				}
+			}
 			prev := false
 			if cur, ok, _ := s.settingsRepo.Get("automation"); ok {
-				var pv struct {
-					Enabled bool `json:"enabled"`
-				}
+				var pv automationSetting
 				_ = json.Unmarshal([]byte(cur), &pv)
 				prev = pv.Enabled
+				if v.WateringWindow == nil {
+					v.WateringWindow = pv.WateringWindow
+				}
+			}
+			if v.WateringWindow != nil && v.WateringWindow.Start == "" {
+				v.WateringWindow = nil // cleared
 			}
 			body, _ := json.Marshal(v)
 			if err := s.settingsRepo.Set(key, string(body)); err != nil {

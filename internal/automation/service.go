@@ -151,6 +151,43 @@ func (s *Service) MaintenanceActive() bool {
 	return *v.Active
 }
 
+// wateringWindow reads the optional morning window from the "automation"
+// settings key: {"watering_window": {"start": "07:45", "end": "11:00"}}.
+// Moisture-triggered soaks are only ENQUEUED inside [start, end) local time;
+// a shelf that goes dry in the evening waits for the next morning (Austin,
+// 2026-11-10: "watering should always happen in the morning once lights are
+// on"). Schedules and manual runs are not gated. A missing or malformed
+// window means no gate. Minutes since local midnight; end < start wraps.
+func (s *Service) wateringWindow() (start, end int, ok bool) {
+	raw, found, err := s.settings.Get("automation")
+	if err != nil || !found {
+		return 0, 0, false
+	}
+	var v struct {
+		Window *struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"watering_window"`
+	}
+	if json.Unmarshal([]byte(raw), &v) != nil || v.Window == nil {
+		return 0, 0, false
+	}
+	start, err1 := parseHHMM(v.Window.Start)
+	end, err2 := parseHHMM(v.Window.End)
+	if err1 != nil || err2 != nil || start == end {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func inWindow(now time.Time, start, end int) bool {
+	m := now.Local().Hour()*60 + now.Local().Minute()
+	if start < end {
+		return m >= start && m < end
+	}
+	return m >= start || m < end // wraps midnight
+}
+
 // enabledZones maps zone_key → enabled. A disabled shelf (e.g. its plant
 // assignment was cleared) must never be watered by automation even if a stale
 // moisture rule or schedule still points at it. On a lookup error every zone
@@ -336,6 +373,14 @@ func (s *Service) evaluateMoistureRule(rule storage.MoistureRule, now time.Time,
 
 	if latest.Value >= rule.TriggerBelow {
 		s.clearBlock(rule.ZoneKey)
+		return
+	}
+
+	// Below threshold — hold for the morning watering window if one is set.
+	if start, end, ok := s.wateringWindow(); ok && !inWindow(now, start, end) {
+		s.blockOnce(rule.ZoneKey, "outside_window",
+			fmt.Sprintf("zone %s below moisture threshold; waiting for the watering window %02d:%02d–%02d:%02d",
+				rule.ZoneKey, start/60, start%60, end/60, end%60))
 		return
 	}
 

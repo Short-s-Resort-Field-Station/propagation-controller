@@ -409,3 +409,42 @@ func TestLargeClockGapSkipsSchedules(t *testing.T) {
 	f.svc.Tick()
 	f.waitCycles(t, "zone_2", 1, 5*time.Second)
 }
+
+// A watering window on the "automation" setting holds a dry shelf until the
+// morning; outside the window the trigger is blocked (and logged once), inside
+// it the soak enqueues as usual. Schedules and manual runs are not gated.
+func TestWateringWindowGatesMoistureTrigger(t *testing.T) {
+	f := newFixture(t)
+	f.seedRule(t, nil)
+	f.insertReading(t, "soil_zone_1_moisture", 22, f.now) // below 28
+
+	// Window that excludes "now": starts an hour from now, lasts two hours.
+	local := f.now.Local()
+	hhmm := func(d time.Duration) string { return local.Add(d).Format("15:04") }
+	set := func(start, end string) {
+		if err := f.svc.settings.Set("automation",
+			`{"enabled":true,"watering_window":{"start":"`+start+`","end":"`+end+`"}}`); err != nil {
+			t.Fatalf("set window: %v", err)
+		}
+	}
+	set(hhmm(time.Hour), hhmm(3*time.Hour))
+	f.svc.Tick()
+	time.Sleep(300 * time.Millisecond)
+	if cycles, _ := f.cycles.List("zone_1", 50); len(cycles) != 0 {
+		t.Fatalf("outside window: expected no cycles, got %d", len(cycles))
+	}
+	f.svc.mu.Lock()
+	blocked := f.svc.lastBlock["zone_1"]
+	f.svc.mu.Unlock()
+	if blocked != "outside_window" {
+		t.Fatalf("expected outside_window block, got %q", blocked)
+	}
+
+	// Window that includes "now" (started an hour ago, ends in two hours).
+	set(hhmm(-time.Hour), hhmm(2*time.Hour))
+	f.svc.Tick()
+	cycles := f.waitCycles(t, "zone_1", 1, 5*time.Second)
+	if cycles[0].TriggerType != "moisture_threshold" {
+		t.Errorf("trigger_type = %q", cycles[0].TriggerType)
+	}
+}
