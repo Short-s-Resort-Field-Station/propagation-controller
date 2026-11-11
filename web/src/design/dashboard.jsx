@@ -1,6 +1,8 @@
 import React from 'react';
-import { PG, ForestMark, LineChart, EventBars } from './data.jsx';
-import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner, PhotoRail } from './flows.jsx';
+import { PG, ForestMark, EventBars } from './data.jsx';
+import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner } from './flows.jsx';
+import { ControlsTab } from './controls.jsx';
+import { DialGauge } from './rack2.jsx';
 
 // pgui-dashboard.jsx — the web dashboard (paper). Tabs:
 // Dashboard · Shelf Management · Environmental · Controls
@@ -191,7 +193,45 @@ function ShelvesTab({ shelves, onAssign, onEdit, onSetEnabled, onUnassign, role 
 // ---------- ENVIRONMENTAL ----------
 // With getSeries (the live build) the charts render hourly aggregates from
 // the backend; without it they fall back to the handoff's demo series.
-function EnvironmentalTab({ getSeries }){
+// Austin (2026-11-10): the dashboard shows the control unit's dials, not
+// line charts. One row per shelf — moisture vs. its rule band, root-zone
+// temperature vs. its happy-band (dial spans 60–90 °F), substrate EC vs. its
+// band (dial spans 0–3000 µS/cm) — the same DialGauge the rack face draws,
+// on paper colours.
+const GAUGE_VARS = { '--sline':'#1B18133D', '--sline-soft':'#1B18131F', '--sink':'#1B1813', '--sfaint':'#1B18135E' };
+function GaugeCell({ label, value, lo, hi, accent, active, readout, unit, target }){
+  return (
+    <div className="env-gcell">
+      <div className="k">{label}</div>
+      <div className="env-gwrap">
+        <DialGauge value={value} lo={lo} hi={hi} accent={accent} size={118} marker active={active} bg="var(--paper)"/>
+        <div className="env-greadout">{active ? <React.Fragment><b>{readout}</b><small style={unit.startsWith('µ')?{textTransform:'none'}:undefined}>{unit}</small></React.Fragment> : <b className="np">—</b>}</div>
+      </div>
+      <div className="env-gtgt">{target}</div>
+    </div>
+  );
+}
+function ShelfGauges({ s }){
+  const tN = s.temp>0 ? Math.max(0, Math.min(100, (s.temp-60)/30*100)) : 0;
+  return (
+    <div className="chart-card env-gauges" style={GAUGE_VARS}>
+      <div className="ch-h">
+        <div className="ch-t"><span className="sw" style={{background:s.stripe||'var(--river)'}}></span>Shelf {s.n} · <span style={{textTransform:'none'}}>{s.species}</span></div>
+        <div className="ch-leg"><span className="mono">{s.status || ''}</span></div>
+      </div>
+      <div className="env-grow">
+        <GaugeCell label="Soil Moisture" value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent="var(--river)" active={!!s.probe}
+          readout={s.moisture} unit="%VWC" target={s.hasRule===false ? <span className="np">Rule · not set</span> : <React.Fragment>Water below <b>{s.lo}%</b> · re-arm <b>{s.hi}%</b></React.Fragment>}/>
+        <GaugeCell label="Root Zone Temp" value={tN} lo={s.tempBand?(s.tempBand[0]-60)/30*100:40} hi={s.tempBand?(s.tempBand[1]-60)/30*100:60} accent="var(--ochre-deep)" active={s.temp>0}
+          readout={s.temp} unit="°F" target={s.tempBand ? <React.Fragment>Band · <b>{s.tempBand[0]}–{s.tempBand[1]}°F</b></React.Fragment> : <span className="np">Band · not set</span>}/>
+        <GaugeCell label="Substrate EC" value={s.ec!=null ? Math.min(100,(s.ec/3000)*100) : 0} lo={s.ecBand?(s.ecBand[0]/3000)*100:(500/3000)*100} hi={s.ecBand?(s.ecBand[1]/3000)*100:(1500/3000)*100} accent="var(--sage-deep)" active={s.ec!=null}
+          readout={s.ec} unit="µS/cm" target={s.ecBand ? <React.Fragment>Band · <b>{s.ecBand[0]}–{s.ecBand[1]} <span style={{textTransform:'none'}}>µS/cm</span></b></React.Fragment> : <span className="np">Band · not set</span>}/>
+      </div>
+    </div>
+  );
+}
+
+function EnvironmentalTab({ getSeries, shelves=[] }){
   const [period, setPeriod] = React.useState('7 Days');
   const periods = ['24 Hours','7 Days','30 Days','Season'];
   const [live, setLive] = React.useState(null);
@@ -202,33 +242,8 @@ function EnvironmentalTab({ getSeries }){
     return ()=>{ alive = false; };
   }, [period, getSeries]);
 
-  const seed = periods.indexOf(period)+1;
-  const n = 28;
-  const demoMoist = [
-    { color:'var(--river)', fill:true, data:PG.series(seed*1.1, n, 67, 12, 2) },
-    { color:'var(--ochre)', data:PG.series(seed*2.3, n, 55, 14, 4) },
-    { color:'var(--sage)', data:PG.series(seed*3.7, n, 70, 9, -2) },
-  ];
-  const demoTemp = [
-    { color:'var(--oxblood)', fill:true, data:PG.series(seed*4.2, n, 75, 6, 1) },
-  ];
-  const demoWater = PG.series(seed*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
-  const demoEc = [{ color:'var(--sage-deep)', fill:true, data:PG.series(seed*6.1, n, 1150, 220, 15).map(v=>Math.round(v)) }];
-
   const isLive = !!(getSeries && live);
-  const moist = isLive ? live.moist : demoMoist;
-  const temp = isLive ? live.temp : demoTemp;
-  const waterEvents = isLive ? live.water : demoWater;
-  const [mLo, mHi] = isLive ? live.moistY : [40, 85];
-  const [tLo, tHi] = isLive ? live.tempY : [68, 82];
-  const legend = isLive
-    ? live.legend
-    : [{color:'var(--river)',label:'Shelf 01'},{color:'var(--ochre)',label:'Shelf 02'},{color:'var(--sage)',label:'Shelf 03'}];
-  const noData = (
-    <div className="cb" style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',padding:'26px 0',textAlign:'center'}}>
-      Collecting data — this chart fills in as hourly aggregates accumulate.
-    </div>
-  );
+  const waterEvents = isLive ? live.water : PG.series((periods.indexOf(period)+1)*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
   return (
     <div>
       <div className="db-h">
@@ -242,45 +257,9 @@ function EnvironmentalTab({ getSeries }){
         </div>
       </div>
 
-      <div className="chart-card">
-        <div className="ch-h">
-          <div className="ch-t"><span className="sw" style={{background:'var(--river)'}}></span>Soil Moisture · %VWC</div>
-          <div className="ch-leg">
-            {legend.map((l,i)=>(<span key={i}><i style={{background:l.color}}></i>{l.label}</span>))}
-          </div>
-        </div>
-        {moist.length
-          ? <div className="cb"><LineChart datasets={moist} yMin={mLo} yMax={mHi} fmtY={v=>v+'%'}/></div>
-          : noData}
-      </div>
-
-      <div className="chart-card">
-        <div className="ch-h">
-          <div className="ch-t"><span className="sw" style={{background:'var(--oxblood)'}}></span>Root Zone Temperature · °F</div>
-          <div className="ch-leg">
-            {(isLive ? (live.tempLegend||[]) : [{color:'var(--oxblood)',label:'Rack mean'}]).map((l,i)=>(
-              <span key={i}><i style={{background:l.color}}></i>{l.label}</span>))}
-          </div>
-        </div>
-        {temp.length
-          ? <div className="cb"><LineChart datasets={temp} yMin={tLo} yMax={tHi} fmtY={v=>v+'°'}/></div>
-          : noData}
-      </div>
-
-      <div className="chart-card">
-        <div className="ch-h">
-          {/* µS/cm sits outside .ch-t's uppercase transform — µ would
-              uppercase to Μ (mu) and misread as mS/cm. */}
-          <div className="ch-t"><span className="sw" style={{background:'var(--sage-deep)'}}></span>Substrate EC · <span style={{textTransform:'none'}}>µS/cm</span></div>
-          <div className="ch-leg">
-            {(isLive ? (live.ecLegend||[]) : [{color:'var(--sage-deep)',label:'Shelf 01'}]).map((l,i)=>(
-              <span key={i}><i style={{background:l.color}}></i>{l.label}</span>))}
-          </div>
-        </div>
-        {(isLive ? live.ec : demoEc).length
-          ? <div className="cb"><LineChart datasets={isLive?live.ec:demoEc} yMin={isLive?live.ecY[0]:400} yMax={isLive?live.ecY[1]:2000} fmtY={v=>Math.round(v)}/></div>
-          : noData}
-      </div>
+      {(shelves.length ? shelves : []).filter(sh=>sh.active || sh.assigned).map(sh=> <ShelfGauges key={sh.n} s={sh}/>)}
+      {!shelves.some(sh=>sh.active || sh.assigned) &&
+        <div className="chart-card"><div className="cb" style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',padding:'26px 0',textAlign:'center'}}>No shelf assigned yet — assign a specimen group and its dials appear here.</div></div>}
 
       <div className="chart-card">
         <div className="ch-h">
@@ -326,139 +305,6 @@ function EnvironmentalTab({ getSeries }){
 }
 
 // ---------- CONTROLS ----------
-function Slider({ label, sub, value, min, max, unit, onChange, disabled }){
-  return (
-    <div className="ctrl-row">
-      <div className="cl">{label}{sub && <small>{sub}</small>}</div>
-      <div style={{display:'flex',alignItems:'center',gap:16}}>
-        <input className="rng" type="range" min={min} max={max} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/>
-        <div className="cv">{value}<span>{unit}</span></div>
-      </div>
-    </div>
-  );
-}
-
-// With a `controls` prop (the live build) the sliders load real per-zone
-// moisture rules and the rack photoperiod, and Apply writes them back
-// through the API. Without it, the tab behaves as the handoff demo.
-function ControlsTab({ role, controls }){
-  const readonly = !role || role==='Viewer';
-  const shelfList = controls && controls.list.length
-    ? controls.list.map(x=>x.n)
-    : ['01','02','03'];
-  const [irr, setIrr] = React.useState({ target:70, min:58, durMin:5, cool:6 });
-  const [shelf, setShelf] = React.useState(shelfList[0] || '01');
-  const [scope, setScope] = React.useState('this');
-  // Photoperiod is "lights on at + hours of light": the off time is derived,
-  // so the two can never add up to more than a day.
-  const [photo, setPhoto] = React.useState({ on:6, hours:13 });
-  const [dirty, setDirty] = React.useState(false);
-  const [saved, setSaved] = React.useState(false);
-  const [confirm, setConfirm] = React.useState(false);
-  const [applyErr, setApplyErr] = React.useState('');
-
-  // Load the selected shelf's real parameters.
-  React.useEffect(()=>{
-    if(!controls) return;
-    let alive = true;
-    controls.load(shelf).then(p=>{
-      if(!alive || !p) return;
-      setIrr({ target:p.target, min:p.min, durMin:p.durMin, cool:p.cool });
-      setPhoto({ on:p.on, hours:p.hours });
-      setDirty(false); setSaved(false); setApplyErr('');
-    }).catch(()=>{});
-    return ()=>{ alive = false; };
-  }, [shelf, controls]);
-
-  const offH = (photo.on + photo.hours) % 24;
-  const set = (k,v)=>{ setIrr(p=>({...p,[k]:v})); setDirty(true); setSaved(false); };
-  const setP = (k,v)=>{ setPhoto(p=>({...p,[k]:v})); setDirty(true); setSaved(false); };
-  const valid = irr.target > irr.min && photo.hours >= 1 && photo.hours <= 23;
-  const apply = ()=>{
-    setConfirm(false);
-    if(!controls){ setDirty(false); setSaved(true); return; }
-    setApplyErr('');
-    controls.apply(scope, shelf, irr, photo)
-      .then(()=>{ setDirty(false); setSaved(true); })
-      .catch(e=>setApplyErr(e.message || 'apply failed'));
-  };
-  return (
-    <div>
-      <div className="db-h">
-        <div className="ttl">Irrigation &amp; Lighting</div>
-        <div className="sub">Per-shelf operating parameters</div>
-      </div>
-      {readonly && <div className="ro-note">Read-only — sign in as a Grower or Steward to change operating parameters.</div>}
-      <div style={{display:'flex',gap:8,alignItems:'center',margin:'0 0 18px'}}>
-        <span className="mono" style={{fontSize:10,letterSpacing:'0.16em',textTransform:'uppercase',color:'#1B181399',marginRight:6}}>Editing</span>
-        <div className="seg">
-          {shelfList.map(sh=>(
-            <button key={sh} className={sh===shelf?'on':''} onClick={()=>setShelf(sh)} disabled={readonly}>Shelf {sh}</button>
-          ))}
-        </div>
-      </div>
-      <div className="ctrl-grid">
-        <div className="panel">
-          <div className="ph"><div className="pt">Irrigation</div><div className="pm">Shelf {shelf}</div></div>
-          <div className="pb">
-            <Slider label="Moisture target" sub="Pump rests above this" value={irr.target} min={40} max={90} unit="%" onChange={v=>set('target',v)} disabled={readonly}/>
-            <Slider label="Moisture minimum" sub="Cycle triggers below this" value={irr.min} min={20} max={80} unit="%" onChange={v=>set('min',v)} disabled={readonly}/>
-            <Slider label="Watering duration" sub="Soak time — large pots may need up to 30 min" value={irr.durMin} min={1} max={30} unit="min" onChange={v=>set('durMin',v)} disabled={readonly}/>
-            <Slider label="Cooldown period" sub="Minimum rest between cycles" value={irr.cool} min={1} max={24} unit="h" onChange={v=>set('cool',v)} disabled={readonly}/>
-            {irr.target<=irr.min && <div className="fx-warn" style={{marginTop:6}}>Target must exceed minimum</div>}
-          </div>
-        </div>
-
-        <div className="panel" style={{alignSelf:'start'}}>
-          <div className="ph"><div className="pt">Lighting · Photoperiod</div><div className="pm">{controls?'Rack-wide':'Shelf '+shelf}</div></div>
-          <div className="pb">
-            <Slider label="Lights on at" sub="Start of the photoperiod" value={photo.on} min={0} max={23} unit=":00" onChange={v=>setP('on',v)} disabled={readonly}/>
-            <Slider label="Hours of light" sub="Off time follows automatically" value={photo.hours} min={1} max={23} unit="h" onChange={v=>setP('hours',v)} disabled={readonly}/>
-            <div className="ctrl-row"><div className="cl">Lights off at<small>Computed</small></div><div className="cv">{String(offH).padStart(2,'0')}<span>:00</span></div></div>
-            <PhotoRail onH={photo.on} hours={photo.hours}/>
-            {/* audit 3.10: the toggle is a 2-hour override (it lapses back to the
-                schedule on its own); the active override is shown and can be
-                cleared with Auto. Viewers see it read-only. */}
-            <div className="ctrl-row" style={{marginTop:4}}>
-              <div className="cl">Manual override<small>{controls && controls.lightOverride
-                ? `Forced ${controls.lightOverride.mode}${controls.lightOverride.until ? ' until '+fmtClockIso(controls.lightOverride.until) : ' until cleared'}`
-                : 'Force lights on for 2 h'}</small></div>
-              <div style={{display:'flex',alignItems:'center',gap:12}}>
-                {controls && controls.lightOverride && controls.clearLight && !readonly &&
-                  <button className="fx-btn" style={{padding:'5px 10px'}} onClick={controls.clearLight}>Auto</button>}
-                <ManualToggle on={controls?controls.lightOn:undefined}
-                  onToggle={controls?controls.manualLight:undefined} disabled={readonly}/>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="apply-bar">
-        <span className="mono" style={{fontSize:10,letterSpacing:'0.16em',textTransform:'uppercase',color:'#1B181399'}}>Apply to</span>
-        <div className="seg">
-          <button className={scope==='this'?'on':''} onClick={()=>setScope('this')} disabled={readonly}>Shelf {shelf}</button>
-          <button className={scope==='all'?'on':''} onClick={()=>setScope('all')} disabled={readonly}>All active shelves</button>
-        </div>
-        {!valid && <span className="fx-warn">Fix ranges before applying</span>}
-        {applyErr && <span className="fx-warn">{applyErr}</span>}
-        <button className="fx-btn primary" style={{marginLeft:'auto'}} disabled={readonly||!dirty||!valid} onClick={()=>setConfirm(true)}>{saved?'Saved ✓':'Review & Apply'}</button>
-      </div>
-      {confirm && <Confirm title="Apply parameters"
-        body={`Apply irrigation & lighting to ${scope==='all'?'all active shelves':'Shelf '+shelf}? Target ${irr.target}%VWC (min ${irr.min}%), ${irr.durMin} min soak, ${irr.cool}h cooldown; photoperiod ${String(photo.on).padStart(2,'0')}:00–${String(offH).padStart(2,'0')}:00 (rack-wide).`}
-        confirmLabel="Apply" onConfirm={apply} onCancel={()=>setConfirm(false)}/>}
-    </div>
-  );
-}
-
-function ManualToggle({ on, onToggle, disabled=false }){
-  const [local,setLocal]=React.useState(false);
-  const state = on !== undefined ? on : local;
-  const flip = ()=>{ if(disabled) return; onToggle ? onToggle(!state) : setLocal(!state); };
-  return <div className={'toggle'+(state?' on':'')} onClick={flip} aria-disabled={disabled}
-    style={disabled?{opacity:0.45,cursor:'default'}:undefined} title={disabled?'Sign in to override lighting':undefined}><i></i></div>;
-}
-const fmtClockIso = (iso)=>{ const d=new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
-
 // Deep-linkable tabs: "/#environmental", "/#controls", "/#shelves".
 // Build AssignModal initial values from a live shelf (quick-edit).
 function editInitial(s){
@@ -572,7 +418,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           onSetEnabled={onSetEnabled}
           onUnassign={onUnassign}
           role={role}/>}
-        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries}/>}
+        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries} shelves={effShelves}/>}
         {tab==='Controls' && <ControlsTab role={role} controls={controls}/>}
       </div>
 

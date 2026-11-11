@@ -110,6 +110,15 @@ export const api = {
   putLightingSchedule: (sch) => req('/lighting/schedule', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sch),
   }),
+  // Circulation fans: the lighting scheduler bound to the fan relay
+  // (2026-11-10). Same shapes as /lighting/*.
+  fans: () => req('/fans/status'),
+  fansSchedule: () => req('/fans/schedule'),
+  putFansSchedule: (sch) => req('/fans/schedule', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sch),
+  }),
+  fansSet: (mode, actor, expiresMinutes) => post(`/fans/${mode}`,
+    expiresMinutes > 0 ? { actor, expires_minutes: expiresMinutes } : { actor }),
   setRelay: (channel, state, actor, reason) => post(`/relays/${channel}/set`, { state, actor, reason }),
   emergencyStop: (actor) => post('/safety/emergency-stop', { actor }),
   // Hidden touch-screen power-down: stops cycles, relays off, then the OS halts.

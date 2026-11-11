@@ -883,4 +883,32 @@
   .ro-note{display:flex;align-items:center;gap:10px;border:1.5px solid var(--ochre-deep);background:#B58A3C1a;color:var(--char);padding:11px 14px;font-family:"Newsreader",serif;font-style:italic;font-size:14px;margin-bottom:18px}
   .apply-bar{display:flex;align-items:center;gap:12px;margin-top:22px;flex-wrap:wrap}
   .ctrl-row input:disabled{opacity:.4}
+  /* Environmental dials (2026-11-10): the rack face's gauges on paper. */
+  .env-grow{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px 16px 14px}
+  .env-gcell{text-align:center}
+  .env-gcell .k{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:#1B181399;margin-bottom:6px}
+  .env-gwrap{position:relative}
+  .env-greadout{position:absolute;left:0;right:0;top:50%;transform:translateY(-32%);text-align:center;pointer-events:none}
+  .env-greadout b{font-family:"Zilla Slab",serif;font-weight:900;font-size:24px;display:block;line-height:1}
+  .env-greadout small{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#1B181399}
+  .env-greadout .np,.env-gtgt .np{color:#1B181366}
+  .env-gtgt{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:#1B181399;margin-top:8px}
+  .env-gtgt b{color:var(--ink);font-weight:600}
+  @media (max-width:900px){.env-grow{grid-template-columns:1fr}}
+  /* Rack Controls (2026-11-10): three rack-wide panels over one shelf panel. */
+  .ctrl-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:24px;align-items:start}
+  .ctrl-grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 32px}
+  .ctrl-time,.ctrl-num{font-family:"JetBrains Mono",monospace;font-size:14px;letter-spacing:0.06em;color:var(--ink);background:var(--bone);border:var(--ctl-bw) solid var(--ink);border-radius:var(--ctl-r);padding:7px 10px;min-height:var(--ctl-h)}
+  .ctrl-num{width:72px;text-align:right}
+  .ctrl-time:disabled,.ctrl-num:disabled{opacity:.45}
+  .ctrl-save{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding-top:12px}
+  .ctrl-save .fx-warn{margin-top:0}
+  .ctrl-note{font-family:"Newsreader",serif;font-style:italic;font-size:13px;color:var(--char);margin-top:10px;line-height:1.4}
+  .ctrl-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .ctrl-btns .fx-btn{padding:0 12px;min-height:34px;font-size:10px}
+  .ctrl-k{font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:#1B181399}
+  .ctrl-sp{font-family:"Newsreader",serif;font-weight:400;font-style:italic;text-transform:none;letter-spacing:0;font-size:14px;color:var(--char)}
+  .ctrl-shelfseg button{padding:6px 12px}
+  @media (max-width:1100px){.ctrl-grid3{grid-template-columns:1fr}.ctrl-grid2{grid-template-columns:1fr}}
+
   .rng:disabled::-webkit-slider-thumb{background:var(--lcd-faint)}

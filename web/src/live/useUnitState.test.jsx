@@ -22,7 +22,8 @@ const GETS = {
   '/relays': { relays: [] },
   '/events?limit=10': { events: [] },
   '/safety/status': { emergency_stop: { active: false }, lockouts: [] },
-  '/settings': { settings: {} },
+  '/settings': { settings: { automation: { enabled: true, watering_window: { start: '07:45', end: '11:00' } } } },
+  '/fans/status': { state: 'manual_on', relay_state: 'on', override: { mode: 'on', until: null } },
   '/species': { species: [] },
   '/irrigation/zones/zone_3/moisture-control': { trigger_below: 45, recovered_above: 60, run_duration_seconds: 300 },
 };
@@ -146,5 +147,27 @@ describe('useUnitState', () => {
     expect(result.current[0].connection).toBe('offline');
     expect(result.current[0].shelves).toHaveLength(1);
     expect(result.current[0].lastSync).toBe(sync);
+  });
+
+  // 2026-11-10: fans ride their own scheduler; a manual toggle is a timed
+  // override via /fans/{on,off}, 'auto' clears it; automation + window are
+  // read from settings.
+  it('reads fan override + automation, and toggles fans through /fans', async () => {
+    installFetch((path) => json(200, { state: 'off', relay_state: 'off' }));
+    const { result } = renderHook(() => useUnitState('manual_web'));
+    await waitFor(() => expect(result.current[0].ready).toBe(true));
+    const [state, actions] = result.current;
+    expect(state.fanOn).toBe(true);
+    expect(state.fanOverride).toEqual({ mode: 'on', until: null });
+    expect(state.automation).toEqual({ enabled: true, window: { start: '07:45', end: '11:00' } });
+    await act(async () => { await actions.fans(false); });
+    const off = calls.find((c) => c.path === '/fans/off');
+    expect(off).toBeTruthy();
+    expect(JSON.parse(off.opts.body)).toMatchObject({ actor: 'manual_web', expires_minutes: 120 });
+    await act(async () => { await actions.fans('auto'); });
+    expect(calls.some((c) => c.path === '/fans/auto')).toBe(true);
+    await act(async () => { await actions.setAutomation(false); });
+    const s = calls.find((c) => c.path === '/settings' && c.opts.method === 'PUT');
+    expect(JSON.parse(s.opts.body)).toEqual({ automation: { enabled: false } });
   });
 });

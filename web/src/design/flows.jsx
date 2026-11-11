@@ -256,7 +256,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
         <div className="asg-grid3">
           <div className="fx-field" style={{marginBottom:0}}>
             <div className="fx-k">Moisture band · %VWC</div>
-            <RangeField lo={lo} hi={hi} setLo={setLo} setHi={setHi} min={20} max={95} unit="%VWC" ok={bandOk}/>
+            <RangeField lo={lo} hi={hi} setLo={setLo} setHi={setHi} min={0} max={100} unit="%VWC" ok={bandOk}/>
           </div>
           <div className="fx-field" style={{marginBottom:0}}>
             <div className="fx-k">Soak</div>
@@ -265,7 +265,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
           <div className="fx-field" style={{marginBottom:0}}>
             {/* live-edit (ebb-flow): drain-back — valve holds open, pump off */}
             <div className="fx-k">Drain-back</div>
-            <NumField v={drainMin} set={setDrainMin} min={0} max={30} unit="min"/>
+            <NumField v={drainMin} set={setDrainMin} min={0} max={60} unit="min"/>
           </div>
         </div>
         <div className="asg-hint" style={{marginTop:12}}>Pump rests above the high mark, triggers below the low. Drain-back holds the valve open after the pump stops so the tray drains back.</div>

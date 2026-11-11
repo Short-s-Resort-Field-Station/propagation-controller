@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { api, BASE } from './api.js';
-import { FANS_RELAY } from './adapter.js';
+import { FANS_RELAY, buildAutomation } from './adapter.js';
 import { PG } from '../design/data.jsx';
 import {
   buildShelves, buildRackStatus, buildLog, buildReservoir, buildLockouts,
@@ -44,6 +44,11 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
     maintenance: false,
     // Audit 3.10: the active manual lighting override, or null.
     lightOverride: null,
+    // Fan scheduler (2026-11-10): active manual override, or null; relay state.
+    fanOverride: null,
+    fanOn: false,
+    // Watering automation switch + morning window.
+    automation: { enabled: false, window: null },
     // Audit 3.1: the last rejected command, { text, at } or null.
     toast: null,
   });
@@ -75,13 +80,15 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
     inflightRef.current = true;
     const seq = ++seqRef.current;
     try {
-      const [health, zonesResp, sensorsResp, lighting, relays, eventsResp, safety, settingsResp] =
+      const [health, zonesResp, sensorsResp, lighting, relays, eventsResp, safety, settingsResp, fans] =
         await Promise.all([
           api.health(), api.zones(), api.sensors(), api.lighting(),
           api.relays(), api.events(10), api.safety(),
           api.settings().catch(() => ({ settings: {} })),
+          api.fans().catch(() => null),
         ]);
       const maintenance = buildMaintenance(settingsResp);
+      const automation = buildAutomation(settingsResp);
 
       if (tickRef.current % RULES_EVERY === 0) {
         const rules = {};
@@ -118,6 +125,12 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
         lightOverride: lighting.override
           ? { mode: lighting.override.mode, until: lighting.override.until || null }
           : null,
+        fanOverride: fans && fans.override
+          ? { mode: fans.override.mode, until: fans.override.until || null }
+          : null,
+        fanOn: fans ? fans.relay_state === 'on'
+          : (relays.relays || []).some((r) => r.channel === FANS_RELAY && r.state === 'on'),
+        automation,
       }));
     } catch {
       if (seq === seqRef.current) {
@@ -212,7 +225,14 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
       // (dashboard toggle, audit 3.10). mode 'auto' clears any override.
       lights: (on, opts) => run('Lights', api.lightingSet(
         on === 'auto' ? 'auto' : (on ? 'on' : 'off'), surface, opts && opts.expiresMinutes)),
-      fans: (on) => run('Fans', api.setRelay(FANS_RELAY, on ? 'on' : 'off', surface, 'circulation fans')),
+      // Fans go through their scheduler (2026-11-10): a manual on/off is a
+      // timed override that lapses back to the fan schedule; 'auto' clears it.
+      fans: (on, opts) => run('Fans', api.fansSet(
+        on === 'auto' ? 'auto' : (on ? 'on' : 'off'), surface,
+        opts && opts.expiresMinutes != null ? opts.expiresMinutes : LIGHT_OVERRIDE_MIN)),
+      // Watering automation master switch (settings key "automation"); the
+      // backend keeps the stored watering window when only enabled is sent.
+      setAutomation: (enabled) => run('Automation', api.putSettings({ automation: { enabled } })),
       // Audit 3.3: emergency stop + reset (dashboard, Grower+).
       emergencyStop: () => run('E-stop', api.emergencyStop(surface)),
       shutdown: () => run('Shut down', api.shutdown(surface)),

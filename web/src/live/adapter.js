@@ -235,6 +235,21 @@ export function buildMaintenance(settingsResp) {
   }
 }
 
+// Watering automation switch + optional morning window from the "automation"
+// setting (2026-11-10). A missing/malformed value reads as off, like the daemon.
+export function buildAutomation(settingsResp) {
+  const a = settingsResp && settingsResp.settings ? settingsResp.settings.automation : null;
+  if (a == null) return { enabled: false, window: null };
+  try {
+    const obj = typeof a === 'string' ? JSON.parse(a) : a;
+    const w = obj && obj.watering_window && obj.watering_window.start && obj.watering_window.end
+      ? { start: obj.watering_window.start, end: obj.watering_window.end } : null;
+    return { enabled: !!(obj && obj.enabled), window: w };
+  } catch {
+    return { enabled: false, window: null };
+  }
+}
+
 export function buildLog(eventsResp) {
   return (eventsResp.events || []).map((e) => ({
     ts: fmtTs(e.occurred_at),
