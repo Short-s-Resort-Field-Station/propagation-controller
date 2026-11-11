@@ -20,7 +20,11 @@ type Config struct {
 	RawDays int `json:"raw_days"`
 }
 
-func DefaultConfig() Config { return Config{RawDays: 30} }
+// 180 days raw (Austin, 2026-11-11): the rack is an R&D bench and the first
+// season's dry-down curves are the data; hourly aggregates are kept forever
+// regardless. ~11 measurements every 10 s ≈ 95k rows/day, ≈ 17M rows at
+// 180 days — a few hundred MB of SQLite on the Piconium's NVMe.
+func DefaultConfig() Config { return Config{RawDays: 180} }
 
 type Service struct {
 	aggregates *storage.AggregateRepo

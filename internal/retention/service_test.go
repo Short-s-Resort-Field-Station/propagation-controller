@@ -90,9 +90,10 @@ func TestAggregationBucketsAndStats(t *testing.T) {
 func TestPruneAggregatesBeforeDeleting(t *testing.T) {
 	svc, readings, aggregates, devID := setup(t)
 
-	// Beyond the 30-day window; truncated to the hour so both samples land
-	// in one bucket regardless of what time of day the test runs.
-	old := time.Now().UTC().AddDate(0, 0, -40).Truncate(time.Hour)
+	// Beyond the raw window (180 days by default); truncated to the hour so
+	// both samples land in one bucket regardless of what time of day the
+	// test runs.
+	old := time.Now().UTC().AddDate(0, 0, -(DefaultConfig().RawDays + 10)).Truncate(time.Hour)
 	insert(t, readings, devID, "m", 42, old.Add(5*time.Minute))
 	insert(t, readings, devID, "m", 44, old.Add(15*time.Minute))
 	fresh := time.Now().UTC().Add(-time.Hour)
