@@ -52,6 +52,14 @@ type ZoneConfig struct {
 	// not start until this drain completes and the valve closes. Default 300 s
 	// (5 min); adjustable per zone.
 	DrainSeconds int `json:"drain_seconds"`
+	// Post-drain purge (Austin, 2026-11-11): water keeps trickling out of the
+	// pots for an hour after a drain-back and collects in the tray and the
+	// fill/drain pipe. PurgeDelaySeconds after a flood's drain-back closes the
+	// valve, the same valve re-opens for PurgeSeconds with the pump off, then
+	// closes again. It runs through the normal one-shelf queue as a
+	// drain-only cycle tagged "purge". PurgeSeconds 0 disables it.
+	PurgeDelaySeconds int `json:"purge_delay_seconds"`
+	PurgeSeconds      int `json:"purge_seconds"`
 	// TargetMoisture ends flooding early once the zone's soil sensor reads
 	// at or above this value. The run duration remains the hard cap.
 	TargetMoisture *float64 `json:"target_moisture,omitempty"`
@@ -80,6 +88,27 @@ type ZoneConfig struct {
 
 // MaxDrainSeconds bounds a zone's drain_seconds and a drain-only request.
 const MaxDrainSeconds = 3600
+
+// Purge bounds: the valve re-open is a short flush (≤ 10 min) and the wait
+// before it at most a day.
+const (
+	MaxPurgeSeconds      = 600
+	MaxPurgeDelaySeconds = 86400
+)
+
+// PendingPurge is a post-drain valve re-open the engine has armed but not yet
+// queued (status view).
+type PendingPurge struct {
+	ZoneKey string    `json:"zone_key"`
+	DueAt   time.Time `json:"due_at"`
+	Seconds int       `json:"seconds"`
+}
+
+type pendingPurge struct {
+	timer *time.Timer
+	due   time.Time
+	secs  int
+}
 
 type Request struct {
 	ZoneKey         string `json:"zone_key"`
@@ -122,6 +151,7 @@ type Engine struct {
 	stopReason string
 	cancelRun  context.CancelFunc
 	wake       chan struct{}
+	purges     map[string]*pendingPurge
 }
 
 func NewEngine(mgr *devices.Manager, sup *safety.Supervisor, zones *storage.ZoneRepo,
@@ -152,7 +182,8 @@ func (e *Engine) SeedDefaults() error {
 	}
 	// Flood caps sized for the largest pots: soaks can run up to 30 minutes
 	// (Austin, 2026-07-06).
-	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 300})
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 300,
+		PurgeDelaySeconds: 3600, PurgeSeconds: 60})
 	soil1 := "soil_zone_1_moisture"
 	seeds := []storage.Zone{
 		{ZoneKey: "zone_1", Name: "Shelf 1", ValveRelayChannel: 1, SoilSensorKey: &soil1,
@@ -299,7 +330,8 @@ func (e *Engine) Enqueue(req Request) (position int, err error) {
 	return position, nil
 }
 
-// Stop aborts the active cycle for a zone or removes it from the queue.
+// Stop aborts the active cycle for a zone, removes it from the queue, or
+// cancels its pending post-drain purge.
 func (e *Engine) Stop(zoneKey, actor string) error {
 	e.mu.Lock()
 	if e.active != nil && e.active.ZoneKey == zoneKey {
@@ -318,8 +350,64 @@ func (e *Engine) Stop(zoneKey, actor string) error {
 			return nil
 		}
 	}
+	if p := e.purges[zoneKey]; p != nil {
+		p.timer.Stop()
+		delete(e.purges, zoneKey)
+		e.mu.Unlock()
+		e.events.Info("irrigation_purge_cancelled",
+			fmt.Sprintf("zone %s post-drain purge cancelled", zoneKey), actor, map[string]any{"zone": zoneKey})
+		return nil
+	}
 	e.mu.Unlock()
 	return fmt.Errorf("zone %q is not running or queued", zoneKey)
+}
+
+// schedulePurge arms the post-drain purge for a shelf (see ZoneConfig): after
+// the delay the same valve re-opens, pump off, through the normal queue. A
+// flood on the shelf before then replaces the pending purge with its own.
+func (e *Engine) schedulePurge(zone *storage.Zone, zcfg ZoneConfig) {
+	if zcfg.PurgeSeconds <= 0 {
+		return
+	}
+	secs := min(zcfg.PurgeSeconds, MaxPurgeSeconds)
+	delay := time.Duration(min(max(zcfg.PurgeDelaySeconds, 0), MaxPurgeDelaySeconds)) * time.Second
+	zk := zone.ZoneKey
+	e.mu.Lock()
+	if e.purges == nil {
+		e.purges = map[string]*pendingPurge{}
+	}
+	if old := e.purges[zk]; old != nil {
+		old.timer.Stop()
+	}
+	ctx := e.rootCtx
+	timer := time.AfterFunc(delay, func() {
+		e.mu.Lock()
+		delete(e.purges, zk)
+		e.mu.Unlock()
+		if ctx != nil && ctx.Err() != nil {
+			return
+		}
+		if _, err := e.Enqueue(Request{ZoneKey: zk, DurationSeconds: secs, DrainOnly: true,
+			TriggerType: "system", TriggerSource: "purge", Reason: "post-drain purge"}); err != nil {
+			e.events.Warn("irrigation_purge_skipped",
+				fmt.Sprintf("zone %s post-drain purge skipped: %v", zk, err), "system", map[string]any{"zone": zk})
+		}
+	})
+	e.purges[zk] = &pendingPurge{timer: timer, due: time.Now().UTC().Add(delay), secs: secs}
+	e.mu.Unlock()
+	e.events.Info("irrigation_purge_scheduled",
+		fmt.Sprintf("zone %s valve re-opens for %ds in %s to clear trickle-down", zk, secs, delay.Round(time.Second)),
+		"system", map[string]any{"zone": zk, "delay_seconds": int(delay.Seconds()), "purge_seconds": secs})
+}
+
+// cancelPurge drops a pending purge (a new flood supersedes it).
+func (e *Engine) cancelPurge(zoneKey string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if p := e.purges[zoneKey]; p != nil {
+		p.timer.Stop()
+		delete(e.purges, zoneKey)
+	}
 }
 
 // StopAll clears the queue and aborts any active cycle.
@@ -343,14 +431,18 @@ func (e *Engine) StopAll(actor string) {
 }
 
 type EngineStatus struct {
-	Active *ActiveCycle `json:"active_cycle"`
-	Queue  []Request    `json:"queue"`
+	Active        *ActiveCycle   `json:"active_cycle"`
+	Queue         []Request      `json:"queue"`
+	PendingPurges []PendingPurge `json:"pending_purges"`
 }
 
 func (e *Engine) Status() EngineStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	st := EngineStatus{Queue: []Request{}}
+	st := EngineStatus{Queue: []Request{}, PendingPurges: []PendingPurge{}}
+	for zk, p := range e.purges {
+		st.PendingPurges = append(st.PendingPurges, PendingPurge{ZoneKey: zk, DueAt: p.due, Seconds: p.secs})
+	}
 	if e.active != nil {
 		a := *e.active
 		st.Active = &a
@@ -392,8 +484,12 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 	var source *string
 	if req.DrainOnly {
 		// Drain-only cycles are tagged so history and the UI can tell a
-		// drain from a watering (requested duration 0, no pump time).
+		// drain (or a post-drain purge) from a watering (requested duration
+		// 0, no pump time).
 		drain := "drain"
+		if req.TriggerSource == "purge" {
+			drain = "purge"
+		}
 		source = &drain
 	} else if req.TriggerSource != "" {
 		source = &req.TriggerSource
@@ -448,6 +544,9 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 		return
 	}
 
+	// A fresh flood supersedes any purge still pending from the last one.
+	e.cancelPurge(zone.ZoneKey)
+
 	// --- open valve, then pump: never pump against a closed manifold ---
 	e.setState(StateOpeningValve)
 	// Valve backstop timeout: even if this process dies mid-cycle, the relay
@@ -494,6 +593,7 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 				fmt.Sprintf("zone %s flood aborted (%s); draining back for %ds before closing valve", zone.ZoneKey, reason, zcfg.DrainSeconds),
 				"system", map[string]any{"zone": zone.ZoneKey, "cycle_id": cycleID})
 			e.drainAndClose(e.rootCtx, zone, valveCh, zcfg.DrainSeconds)
+			e.schedulePurge(zone, zcfg)
 		} else {
 			// E-stop, all-off, or a manual valve command already closed the
 			// valve (or forbids opening it): waiting out a "drain" with the
@@ -510,6 +610,9 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 	}
 
 	interrupted, valveOffErr := e.drainAndClose(ctx, zone, valveCh, zcfg.DrainSeconds)
+	if valveOffErr == nil {
+		e.schedulePurge(zone, zcfg)
+	}
 
 	if pumpOffErr != nil || valveOffErr != nil {
 		e.finish(cycleID, zone, &actual, ResultFailed, "",

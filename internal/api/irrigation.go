@@ -74,6 +74,8 @@ type zonePatch struct {
 	MinReservoirLevel *float64 `json:"min_reservoir_level"`
 	DefaultRunSeconds *int     `json:"default_run_seconds"`
 	DrainSeconds      *int     `json:"drain_seconds"`
+	PurgeDelaySeconds *int     `json:"purge_delay_seconds"`
+	PurgeSeconds      *int     `json:"purge_seconds"`
 	TargetMoisture    *float64 `json:"target_moisture"`
 	Species           *string  `json:"species"`
 	SpeciesLatin      *string  `json:"species_latin"`
@@ -149,6 +151,21 @@ func (s *Server) handlePatchZone(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.DrainSeconds = *p.DrainSeconds
+	}
+	// Post-drain purge (Austin, 2026-11-11): valve re-open after the drain.
+	if p.PurgeDelaySeconds != nil {
+		if *p.PurgeDelaySeconds < 0 || *p.PurgeDelaySeconds > irrigation.MaxPurgeDelaySeconds {
+			writeError(w, http.StatusBadRequest, "purge_delay_seconds must be between 0 and 86400")
+			return
+		}
+		cfg.PurgeDelaySeconds = *p.PurgeDelaySeconds
+	}
+	if p.PurgeSeconds != nil {
+		if *p.PurgeSeconds < 0 || *p.PurgeSeconds > irrigation.MaxPurgeSeconds {
+			writeError(w, http.StatusBadRequest, "purge_seconds must be between 0 and 600 (0 disables)")
+			return
+		}
+		cfg.PurgeSeconds = *p.PurgeSeconds
 	}
 	if p.TargetMoisture != nil {
 		if *p.TargetMoisture <= 0 {

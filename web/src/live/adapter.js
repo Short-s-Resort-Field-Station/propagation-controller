@@ -161,6 +161,9 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
         durMin: rule ? Math.max(1, Math.round(rule.run_duration_seconds / 60)) : 0,
         // live-edit (ebb-flow): drain-back time (valve holds open), minutes.
         drainMin: Math.max(0, Math.round((cfg.drain_seconds ?? 300) / 60)),
+        // Post-drain purge (2026-11-11): minutes after the drain, seconds open.
+        purgeAfterMin: Math.max(0, Math.round((cfg.purge_delay_seconds ?? 0) / 60)),
+        purgeSec: Math.max(0, Math.round(cfg.purge_seconds ?? 0)),
         // change 3: EC/temp target ranges for the edit modal (happy band).
         ecLo: cfg.ec_min ?? null, ecHi: cfg.ec_max ?? null,
         tempLo: cfg.temp_min_f ?? null, tempHi: cfg.temp_max_f ?? null,

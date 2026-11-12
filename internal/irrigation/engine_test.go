@@ -599,3 +599,85 @@ func TestAllOffDuringFloodDoesNotFakeDrain(t *testing.T) {
 		t.Errorf("engine still active after all-off: %+v", st.Active)
 	}
 }
+
+func (f *fixture) setPurge(t *testing.T, zoneKey string, drainSeconds, purgeDelay, purgeSeconds int) {
+	t.Helper()
+	z, _ := f.zones.GetByKey(zoneKey)
+	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: drainSeconds,
+		PurgeDelaySeconds: purgeDelay, PurgeSeconds: purgeSeconds})
+	z.ConfigJSON = string(cfg)
+	if err := f.zones.Update(*z); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+}
+
+// TestPostDrainPurgeReopensValve (Austin, 2026-11-11): after a flood's
+// drain-back closes the valve, the same valve re-opens once more for the
+// purge time with the pump off, as its own "purge" cycle.
+func TestPostDrainPurgeReopensValve(t *testing.T) {
+	f := newFixture(t)
+	f.setPurge(t, "zone_1", 1, 1, 1)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	flood := f.waitCycleResult(t, "zone_1", ResultComplete, 6*time.Second)
+	if !f.hasEvent(t, "irrigation_purge_scheduled") {
+		t.Fatal("purge not scheduled after flood drain-back")
+	}
+	st := f.engine.Status()
+	if len(st.PendingPurges) != 1 || st.PendingPurges[0].ZoneKey != "zone_1" {
+		t.Fatalf("pending purges = %+v", st.PendingPurges)
+	}
+	// Wait for the purge cycle: valve opens with the pump off, then closes.
+	sawValveOpen := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.relayState(t, 1) == relay.On {
+			sawValveOpen = true
+			if f.relayState(t, devices.PumpChannel) == relay.On {
+				t.Fatal("pump ran during purge")
+			}
+		}
+		cycles, _ := f.cycles.List("zone_1", 1)
+		if sawValveOpen && len(cycles) > 0 && cycles[0].ID != flood.ID && cycles[0].Result == ResultComplete {
+			if cycles[0].TriggerSource == nil || *cycles[0].TriggerSource != "purge" {
+				t.Fatalf("purge cycle tagged %v", cycles[0].TriggerSource)
+			}
+			if f.relayState(t, 1) != relay.Off {
+				t.Fatal("valve left open after purge")
+			}
+			if len(f.engine.Status().PendingPurges) != 0 {
+				t.Fatal("purge still listed as pending after it ran")
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("purge cycle never ran (valve opened: %v)", sawValveOpen)
+}
+
+// TestStopCancelsPendingPurge: Stop on an idle shelf with a purge armed
+// cancels the purge instead of erroring.
+func TestStopCancelsPendingPurge(t *testing.T) {
+	f := newFixture(t)
+	f.setPurge(t, "zone_1", 1, 3600, 60)
+	if _, err := f.engine.Enqueue(Request{ZoneKey: "zone_1", DurationSeconds: 1, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	f.waitCycleResult(t, "zone_1", ResultComplete, 6*time.Second)
+	if len(f.engine.Status().PendingPurges) != 1 {
+		t.Fatal("expected one pending purge")
+	}
+	if err := f.engine.Stop("zone_1", "manual_web"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(f.engine.Status().PendingPurges) != 0 {
+		t.Fatal("purge still pending after Stop")
+	}
+	if !f.hasEvent(t, "irrigation_purge_cancelled") {
+		t.Error("expected irrigation_purge_cancelled event")
+	}
+	if err := f.engine.Stop("zone_1", "manual_web"); err == nil {
+		t.Error("second Stop should report nothing to stop")
+	}
+}

@@ -106,6 +106,10 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
   const [durMin,setDurMin] = React.useState(initial && initial.durMin ? initial.durMin : 5);
   // live-edit (ebb-flow): drain-back time — valve holds open after the pump stops.
   const [drainMin,setDrainMin] = React.useState(initial && initial.drainMin!=null ? initial.drainMin : 5);
+  // Post-drain purge (2026-11-11): valve re-opens once more, pump off, to clear
+  // the water that trickles out of the pots after the drain. 0 s = off.
+  const [purgeAfterMin,setPurgeAfterMin] = React.useState(initial && initial.purgeAfterMin!=null ? initial.purgeAfterMin : 60);
+  const [purgeSec,setPurgeSec] = React.useState(initial && initial.purgeSec!=null ? initial.purgeSec : 60);
   // change 3: monitoring-only EC / temperature happy-bands + carried moisture
   // guards (cooldown / daily cap) so a saved profile round-trips fully.
   const [ecLo,setEcLo] = React.useState(initial && initial.ecLo!=null ? initial.ecLo : sp.ecLo);
@@ -139,6 +143,8 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
       if(s.moisture.recovered_above!=null) setHi(Math.round(s.moisture.recovered_above));
       if(s.moisture.run_duration_seconds!=null) setDurMin(Math.max(1,Math.round(s.moisture.run_duration_seconds/60)));
       if(s.moisture.drain_seconds!=null) setDrainMin(Math.max(0,Math.round(s.moisture.drain_seconds/60)));
+      if(s.moisture.purge_delay_seconds!=null) setPurgeAfterMin(Math.max(0,Math.round(s.moisture.purge_delay_seconds/60)));
+      if(s.moisture.purge_seconds!=null) setPurgeSec(Math.max(0,Math.round(s.moisture.purge_seconds)));
       if(s.moisture.minimum_interval_minutes!=null) setCoolMin(s.moisture.minimum_interval_minutes);
       if(s.moisture.max_cycles_per_day!=null) setMaxCycles(s.moisture.max_cycles_per_day);
     }
@@ -158,6 +164,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
 
   const settingsPayload = ()=>({
     moisture:{ trigger_below:lo, recovered_above:hi, run_duration_seconds:durMin*60, drain_seconds:drainMin*60,
+      purge_delay_seconds:purgeAfterMin*60, purge_seconds:purgeSec,
       minimum_interval_minutes:coolMin, max_cycles_per_day:maxCycles },
     ec:{ min:ecLo, max:ecHi }, temp:{ min:tempLo, max:tempHi },
   });
@@ -179,7 +186,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
   const submit = () => { if(!allOk) return;
     onAssign(shelfN, { active:true, species:sp.species, tag:sp.tag,
       species2: sp2?sp2.species:'', tag2: sp2?sp2.tag:'',
-      moisture:Math.round((lo+hi)/2), lo, hi, durMin, drainMin,
+      moisture:Math.round((lo+hi)/2), lo, hi, durMin, drainMin, purgeAfterMin, purgeSec,
       ecLo, ecHi, tempLo, tempHi, minIntervalMin:coolMin, maxCycles,
       speciesId: sp.id, profileId: appliedProf?appliedProf.id:0, profileName: appliedProf?appliedProf.name:'', stage,
       lastWater:'—', usage:'—', status:'Healthy', stripe:sp.stripe });
@@ -263,7 +270,17 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
             <NumField v={drainMin} set={setDrainMin} min={0} max={60} unit="min"/>
           </div>
         </div>
-        <div className="asg-hint" style={{marginTop:12}}>Pump rests above the high mark, triggers below the low. Drain-back holds the valve open after the pump stops so the tray drains back.</div>
+        <div className="asg-grid3" style={{marginTop:10}}>
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Purge after drain</div>
+            <NumField v={purgeAfterMin} set={setPurgeAfterMin} min={0} max={1440} unit="min"/>
+          </div>
+          <div className="fx-field" style={{marginBottom:0}}>
+            <div className="fx-k">Purge valve open</div>
+            <NumField v={purgeSec} set={setPurgeSec} min={0} max={600} unit="s"/>
+          </div>
+        </div>
+        <div className="asg-hint" style={{marginTop:12}}>Pump rests above the high mark, triggers below the low. Drain-back holds the valve open after the pump stops so the tray drains back. The purge re-opens the valve once more, pump off, to clear water that trickles out of the pots after the drain; 0 s turns it off.</div>
 
         {/* ── MONITORING TARGETS ─────────────────────────────── */}
         <div className="asg-sec">Monitoring targets · happy band</div>

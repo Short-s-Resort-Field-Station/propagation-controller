@@ -257,6 +257,9 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
             enabled: true,
             // live-edit (ebb-flow): drain-back time — valve holds open after pump stops.
             drain_seconds: (fields.drainMin != null ? fields.drainMin : 5) * 60,
+            // Post-drain purge (2026-11-11): valve re-open after the drain, pump off.
+            purge_delay_seconds: (fields.purgeAfterMin != null ? fields.purgeAfterMin : 60) * 60,
+            purge_seconds: fields.purgeSec != null ? fields.purgeSec : 60,
             // change 3: monitoring-only EC/temp happy-band + applied-profile
             // linkage (0 clears a bound, so an unset range removes any old band).
             ec_min: fields.ecLo ?? 0,

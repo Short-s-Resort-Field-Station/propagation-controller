@@ -597,6 +597,7 @@ Each zone should have:
 * Schedule rules
 * Maximum flood duration
 * Drain/rest duration
+* Post-drain purge (delay after the drain, seconds the valve re-opens with the pump off; 0 = off)
 * Minimum reservoir level
 * Lockout rules
 * Manual override permissions
@@ -618,6 +619,8 @@ aborted
 failed
 locked_out
 ```
+
+After `draining` closes the valve, a zone with a purge configured arms a timer; when it fires the engine queues a drain-only cycle (trigger source `purge`) that re-opens the same valve for the purge seconds, pump off, then closes it. Pending purges appear in the engine status and are cancelled by a Stop on that zone or superseded by a new flood.
 
 ## 9.3 Irrigation Prechecks
 
