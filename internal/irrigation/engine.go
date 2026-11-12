@@ -209,14 +209,35 @@ func (e *Engine) Start(ctx context.Context) {
 	// A cycle still "running" in the DB was interrupted by a crash or power
 	// loss (2026-11-10: a reboot mid-drain left a phantom "Watering"). The
 	// startup safe-state already closed its valve; close the record too.
+	// Remember which shelves were mid-cycle: their trays may be full, and a
+	// tray left full rots roots (Austin, 2026-11-11: drain automatically).
+	interrupted, err := e.cycles.RunningZoneKeys()
+	if err != nil {
+		e.log.Error().Err(err).Msg("failed to list interrupted cycles")
+	}
 	if n, err := e.cycles.AbortInterrupted("interrupted by controller restart"); err != nil {
 		e.log.Error().Err(err).Msg("failed to abort interrupted cycles")
 	} else if n > 0 {
 		e.events.Warn("irrigation_cycles_interrupted",
-			fmt.Sprintf("%d irrigation cycle(s) were interrupted by a restart and marked aborted; tray may still hold water — use Drain", n),
-			"startup", map[string]any{"count": n})
+			fmt.Sprintf("%d irrigation cycle(s) were interrupted by a restart and marked aborted; draining the affected shelves", n),
+			"startup", map[string]any{"count": n, "zones": interrupted})
 	}
 	go e.worker(ctx)
+	// Recovery drain: valve open for the shelf's own drain time, pump never
+	// touched, one shelf at a time through the normal queue. An e-stop or a
+	// disabled shelf refuses it, and that refusal is logged.
+	for _, zk := range interrupted {
+		if _, err := e.Enqueue(Request{ZoneKey: zk, DrainOnly: true, TriggerType: "system",
+			Reason: "recovery drain after interrupted cycle"}); err != nil {
+			e.events.Warn("irrigation_recovery_drain_skipped",
+				fmt.Sprintf("zone %s could not be drained after the restart (%v) — tray may still hold water — use Drain", zk, err),
+				"startup", map[string]any{"zone": zk})
+			continue
+		}
+		e.events.Info("irrigation_recovery_drain",
+			fmt.Sprintf("zone %s draining after a cycle interrupted by the restart", zk),
+			"startup", map[string]any{"zone": zk})
+	}
 }
 
 func (e *Engine) worker(ctx context.Context) {

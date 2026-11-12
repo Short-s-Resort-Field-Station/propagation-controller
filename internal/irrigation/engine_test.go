@@ -681,3 +681,45 @@ func TestStopCancelsPendingPurge(t *testing.T) {
 		t.Error("second Stop should report nothing to stop")
 	}
 }
+
+// TestRestartDrainsInterruptedShelf (Austin, 2026-11-11): a cycle left
+// "running" by a crash or power loss means a tray that may be full. On start
+// the engine closes the record and drains that shelf — valve only, no pump.
+func TestRestartDrainsInterruptedShelf(t *testing.T) {
+	f := newFixture(t)
+	f.setDrain(t, "zone_2", 1)
+	z, _ := f.zones.GetByKey("zone_2")
+	if _, err := f.cycles.InsertStart(z.ID, 420, "moisture", nil, nil, nil); err != nil {
+		t.Fatalf("insert running cycle: %v", err)
+	}
+	// A second engine on the same store stands in for the restarted daemon.
+	restarted := NewEngine(f.mgr, f.sup, f.zones, f.cycles, f.readings,
+		logging.NewEventLogger(zerolog.Nop(), f.events), zerolog.Nop(), "reservoir_level_level")
+	restarted.Start(f.ctx)
+
+	sawValve := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.relayState(t, devices.PumpChannel) == relay.On {
+			t.Fatal("pump ran during the recovery drain")
+		}
+		if f.relayState(t, 2) == relay.On {
+			sawValve = true
+		}
+		cycles, _ := f.cycles.List("zone_2", 2)
+		if sawValve && len(cycles) == 2 && cycles[0].Result == ResultComplete {
+			if cycles[0].TriggerSource == nil || *cycles[0].TriggerSource != "drain" {
+				t.Errorf("recovery cycle tagged %v", cycles[0].TriggerSource)
+			}
+			if cycles[1].Result != ResultAborted {
+				t.Errorf("interrupted cycle result = %q", cycles[1].Result)
+			}
+			if !f.hasEvent(t, "irrigation_recovery_drain") {
+				t.Error("expected irrigation_recovery_drain event")
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("recovery drain never completed (valve opened: %v)", sawValve)
+}

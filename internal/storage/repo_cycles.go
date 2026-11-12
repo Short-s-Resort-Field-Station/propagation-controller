@@ -144,3 +144,28 @@ func (r *CycleRepo) AbortInterrupted(reason string) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// RunningZoneKeys lists the zones with a cycle still marked "running" —
+// read at engine start, before AbortInterrupted, to know which trays a crash
+// or power loss may have left holding water. Purges are skipped: a
+// 60-second valve re-open leaves nothing behind.
+func (r *CycleRepo) RunningZoneKeys() ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT DISTINCT z.zone_key FROM irrigation_cycles c
+		 JOIN irrigation_zones z ON z.id = c.zone_id
+		 WHERE c.result = 'running' AND COALESCE(c.trigger_source, '') != 'purge'
+		 ORDER BY z.zone_key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
