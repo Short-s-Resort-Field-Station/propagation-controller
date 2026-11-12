@@ -168,17 +168,31 @@ func main() {
 	retentionSvc.Start(ctx)
 	// Set aside readings stored while a probe was out of its pot, then
 	// rebuild the hourly aggregates without them (idempotent; 2026-11-11).
+	// One-off backfill, recorded in settings: the scan and rebuild hold the
+	// single DB connection, so they run once and in day-sized steps (the
+	// first version ran in one pass at every start and starved the relay
+	// check — relay_controller_unreachable + a watchdog restart).
 	go func() {
+		const doneKey = "out_of_media_backfill"
+		if _, done, _ := settingsRepo.Get(doneKey); done {
+			return
+		}
 		n, err := readingRepo.FlagOutOfMediaHistory(2 * time.Minute)
 		if err != nil {
 			log.Error().Err(err).Msg("out-of-media history flagging failed")
 			return
 		}
-		if n > 0 {
-			if _, err := aggregateRepo.AggregateRange(time.Time{}, time.Now().UTC().Add(time.Hour)); err != nil {
+		now := time.Now().UTC()
+		for day := 200; day >= 0 && n > 0; day-- {
+			from := now.Add(-time.Duration(day+1) * 24 * time.Hour)
+			if _, err := aggregateRepo.AggregateRange(from, from.Add(25*time.Hour)); err != nil {
 				log.Error().Err(err).Msg("re-aggregation after out-of-media flagging failed")
 				return
 			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		settingsRepo.Set(doneKey, `{"done":true}`)
+		if n > 0 {
 			eventLog.Info("out_of_media_history_flagged",
 				fmt.Sprintf("%d stored readings taken with a probe out of its pot were set aside; hourly averages rebuilt", n),
 				"startup", map[string]any{"rows": n})

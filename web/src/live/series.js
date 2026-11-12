@@ -96,7 +96,7 @@ export async function getEnvSeries(period, shelves) {
   let water = new Array(14).fill(0);
   const runsByZone = {};
   try {
-    const r = await api.cycles(2000);
+    const r = await api.cycles(500); // server cap; a larger ask falls back to 100
     for (const c of r.cycles || []) {
       const t = new Date(c.started_at).getTime();
       // A watering still in progress has no actual duration yet: count it
@@ -131,10 +131,6 @@ export async function getEnvSeries(period, shelves) {
   return {
     range: { fromMs, toMs },
     perShelf,
-    moist: moist.series, temp: temp.series, ec: ec.series,
-    moistY: yBounds(moist.series, 0, 60, 5, 0),
-    tempY: yBounds(temp.series, 60, 90, 2),
-    ecY: yBounds(ec.series, 0, 1000, 50, 0),
     water, adherence,
   };
 }

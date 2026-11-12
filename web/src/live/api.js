@@ -81,8 +81,6 @@ export const api = {
   cycles: (limit = 50) => req(`/irrigation/cycles?limit=${limit}`),
   moistureControl: (zoneKey) => req(`/irrigation/zones/${zoneKey}/moisture-control`),
   readings: (sensorKey, limit = 500) => req(`/sensors/${sensorKey}/readings?limit=${limit}`),
-  aggregates: (sensorKey, fromISO) =>
-    req(`/sensors/${sensorKey}/readings?interval=hour&from=${encodeURIComponent(fromISO)}`),
   // Timeline series (2026-11-11): interval "hour" = stored hourly aggregates
   // (limit covers a season), or a bucket width like "5m" for the 24-hour view.
   series: (sensorKey, fromISO, interval = 'hour') =>

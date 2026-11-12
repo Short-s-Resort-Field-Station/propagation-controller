@@ -610,7 +610,9 @@ func (e *Engine) runCycle(ctx context.Context, req *Request) {
 	}
 
 	interrupted, valveOffErr := e.drainAndClose(ctx, zone, valveCh, zcfg.DrainSeconds)
-	if valveOffErr == nil {
+	// A Stop during the drain means the operator is done with this shelf:
+	// no purge an hour later.
+	if valveOffErr == nil && !interrupted {
 		e.schedulePurge(zone, zcfg)
 	}
 

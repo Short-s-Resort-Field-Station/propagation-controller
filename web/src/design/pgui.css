@@ -733,6 +733,9 @@
   .chart-card .ch-leg i{width:14px;height:3px;display:block}
   .chart-card .cb{padding:14px 16px 8px}
   /* environmental: one section per shelf (2026-11-11) */
+  .chart-card .ch-t .ch-now{margin-left:8px;font-size:22px;line-height:1;display:inline-flex;align-items:baseline;gap:6px}
+  .chart-card .ch-t .ch-now small{font-family:"JetBrains Mono",monospace;font-weight:400;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#1B181399}
+  .env-controls{flex-wrap:wrap;justify-content:flex-end}
   .env-shelf{margin-top:34px}
   .env-shelf-h{font-family:"Zilla Slab",serif;font-weight:900;font-size:19px;text-transform:uppercase;letter-spacing:0.01em;display:flex;align-items:center;gap:10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
   .env-shelf-h .sw{width:16px;height:16px;border-radius:3px}
@@ -935,6 +938,7 @@
     .db-2col,.shelf-grid,.ctrl-grid,.ctrl-grid3,.fx-2,.asg-grid3{grid-template-columns:1fr !important;gap:14px}
     .stat-grid{grid-template-columns:repeat(2,1fr)}
     .env-controls,.seg{width:100%}
+    .chart-card .ch-t{flex-wrap:wrap}
     .seg{display:flex}
     .seg button{flex:1;padding:12px 4px;font-size:9.5px;letter-spacing:0.08em}
     .chart-card .ch-h{flex-direction:column;align-items:flex-start;gap:6px;padding:10px 12px}

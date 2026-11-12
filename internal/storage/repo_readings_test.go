@@ -99,3 +99,43 @@ func TestOutOfMediaReadingsExcluded(t *testing.T) {
 		}
 	}
 }
+
+// The aggregation pass shares the single DB connection with the relay and
+// safety paths, so it must stay fast at realistic table sizes (2026-11-11:
+// a slow pass tripped relay_controller_unreachable and a watchdog restart).
+func TestAggregateRangeStaysFast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test")
+	}
+	db := openTestDB(t)
+	repo := NewReadingRepo(db)
+	aggs := NewAggregateRepo(db)
+	devices := NewDeviceRepo(db)
+	devices.Upsert("soil_zone_1", "Probe", "soil_sensor", "generic_modbus", "{}", "simulated")
+	dev, _ := devices.GetByKey("soil_zone_1")
+	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Hour)
+	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	for h := 0; h < 48; h++ { // 11 keys, one reading every 10 s, two days
+		var ins []ReadingInsert
+		for s := 0; s < 360; s++ {
+			at := base.Add(time.Duration(h)*time.Hour + time.Duration(s)*10*time.Second)
+			for _, k := range keys {
+				ins = append(ins, ReadingInsert{SensorKey: k, Value: 20, Unit: "%", Quality: "good", ReadAt: at})
+			}
+		}
+		if err := repo.InsertBatch(dev.ID, ins); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		if _, err := aggs.AggregateRange(base, base.Add(49*time.Hour)); err != nil {
+			t.Fatalf("aggregate: %v", err)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("pass %d took %s, want under 2s", i+1, d)
+		} else {
+			t.Logf("pass %d: %s", i+1, d)
+		}
+	}
+}

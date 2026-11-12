@@ -196,13 +196,16 @@ function ShelvesTab({ shelves, onAssign, onEdit, onSetEnabled, onUnassign, role 
 // (2026-11-11): line charts, not dials — a real date axis that scales with
 // the window, the period's peak and low labelled, hover for the numbers.
 const HOURS = { '24 Hours':24, '7 Days':168, '30 Days':720, 'Season':2160 };
-function MetricChart({ title, unit, color, series, y, range, fmtY, period, runs=[] }){
+function MetricChart({ title, unit, color, series, y, range, fmtY, period, runs=[], now=null }){
   const tinted = series.map(s=>({ ...s, color }));
   const tgt = tinted.find(s=>s.target);
   return (
     <div className="chart-card">
       <div className="ch-h">
-        <div className="ch-t"><span className="sw" style={{background:color}}></span>{title} · <span style={{textTransform:'none'}}>{unit}</span></div>
+        <div className="ch-t"><span className="sw" style={{background:color}}></span>{title} · <span style={{textTransform:'none'}}>{unit}</span>
+          {/* The live reading, right by the label (Austin, 2026-11-11). */}
+          <span className="ch-now" style={{color}}>{now!=null ? <React.Fragment><small>now</small>{now}</React.Fragment> : <small>now —</small>}</span>
+        </div>
         <div className="ch-leg">
           {tgt ? <span>ideal {tgt.target[0]}–{tgt.target[1]}</span> : <span>no target set</span>}
           <span>avg · dashed</span>
@@ -220,11 +223,11 @@ function ShelfSection({ ps, shelf, range, period }){
     <div className="env-shelf">
       <div className="env-shelf-h"><span className="sw" style={{background:shelf.stripe||'var(--river)'}}></span>Shelf {ps.n} · <span style={{textTransform:'none'}}>{shelf.species||''}</span></div>
       <MetricChart title="Soil Moisture" unit="%VWC" color="var(--river)" period={period} range={range} runs={ps.runs}
-        series={ps.moist.series} y={ps.moist.y} fmtY={v=>v}/>
+        series={ps.moist.series} y={ps.moist.y} fmtY={v=>v} now={shelf.probe ? shelf.moisture : null}/>
       <MetricChart title="Root Zone Temperature" unit="°F" color="var(--ochre-deep)" period={period} range={range} runs={ps.runs}
-        series={ps.temp.series} y={ps.temp.y} fmtY={v=>v}/>
+        series={ps.temp.series} y={ps.temp.y} fmtY={v=>v} now={shelf.probe && shelf.temp>0 ? shelf.temp : null}/>
       <MetricChart title="Substrate EC" unit="µS/cm" color="var(--sage-deep)" period={period} range={range} runs={ps.runs}
-        series={ps.ec.series} y={ps.ec.y} fmtY={v=>Math.round(v)}/>
+        series={ps.ec.series} y={ps.ec.y} fmtY={v=>Math.round(v)} now={shelf.probe && shelf.ec!=null ? shelf.ec : null}/>
     </div>
   );
 }
@@ -233,6 +236,8 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
   const [period, setPeriod] = React.useState('7 Days');
   const periods = ['24 Hours','7 Days','30 Days','Season'];
   const [live, setLive] = React.useState(null);
+  // One shelf at a time (Austin, 2026-11-11): each shelf is its own sub-page.
+  const [shelfN, setShelfN] = React.useState(null);
   React.useEffect(()=>{
     if(!getSeries) return;
     let alive = true;
@@ -241,6 +246,8 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
   }, [period, getSeries]);
 
   const isLive = !!(getSeries && live);
+  const perShelf = isLive && live.perShelf ? live.perShelf : [];
+  const curN = perShelf.some(ps=>String(ps.n)===String(shelfN)) ? shelfN : (perShelf[0] ? perShelf[0].n : null);
   const range = isLive && live.range ? live.range : { fromMs: Date.now()-(HOURS[period]||168)*3600e3, toMs: Date.now() };
   const waterEvents = isLive ? live.water : PG.series((periods.indexOf(period)+1)*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
   return (
@@ -248,6 +255,13 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
       <div className="db-h">
         <div className="ttl">Environmental Monitoring</div>
         <div className="env-controls">
+          {perShelf.length>1 && (
+            <div className="seg">
+              {perShelf.map(ps=>(
+                <button key={ps.n} className={String(ps.n)===String(curN)?'on':''} onClick={()=>setShelfN(ps.n)}>Shelf {ps.n}</button>
+              ))}
+            </div>
+          )}
           <div className="seg">
             {periods.map(p=>(
               <button key={p} className={p===period?'on':''} onClick={()=>setPeriod(p)}>{p}</button>
@@ -256,10 +270,10 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
         </div>
       </div>
 
-      {(isLive && live.perShelf ? live.perShelf : []).map(ps=>(
+      {perShelf.filter(ps=>String(ps.n)===String(curN)).map(ps=>(
         <ShelfSection key={ps.n} ps={ps} shelf={shelves.find(x=>String(x.n)===String(ps.n))||{}} range={range} period={period}/>
       ))}
-      {!(isLive && live.perShelf && live.perShelf.length) &&
+      {!perShelf.length &&
         <div className="chart-card"><div className="cb" style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',padding:'26px 0',textAlign:'center'}}>No readings yet for this window — each assigned shelf gets its own section here.</div></div>}
 
       <div className="chart-card">
@@ -317,6 +331,8 @@ function editInitial(s){
     durMin: raw.durMin || 5,
     // change 1: carry the shelf's real drain-back time into the edit modal.
     drainMin: raw.drainMin,
+    // Post-drain purge: carry the stored values so a save never resets them.
+    purgeAfterMin: raw.purgeAfterMin, purgeSec: raw.purgeSec,
     // change 3: EC/temp happy-bands, applied profile, and moisture guards.
     ecLo: raw.ecLo, ecHi: raw.ecHi, tempLo: raw.tempLo, tempHi: raw.tempHi,
     profileId: raw.profileId, stage: raw.stage,
