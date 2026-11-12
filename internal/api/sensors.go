@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -86,7 +87,32 @@ func (s *Server) handleSensorReadings(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"sensor_key": key, "interval": "hour", "aggregates": aggs})
 	default:
-		writeError(w, http.StatusBadRequest, `interval must be "raw" or "hour"`)
+		// interval=5m / 15m / 30m…: raw readings summarised into fixed buckets
+		// (min/avg/max) for the dashboard's 24-hour timeline (2026-11-11).
+		// Sub-hour buckets scan raw rows, so the window is capped at 7 days.
+		bucket, err := time.ParseDuration(q.Get("interval"))
+		if err != nil || bucket < time.Minute || bucket > 6*time.Hour {
+			writeError(w, http.StatusBadRequest, `interval must be "raw", "hour", or a bucket width between 1m and 6h (e.g. 5m)`)
+			return
+		}
+		end := time.Now().UTC()
+		if to != nil {
+			end = *to
+		}
+		start := end.Add(-24 * time.Hour)
+		if from != nil {
+			start = *from
+		}
+		if end.Sub(start) > 7*24*time.Hour {
+			writeError(w, http.StatusBadRequest, "bucketed readings cover at most 7 days; use interval=hour for longer ranges")
+			return
+		}
+		aggs, err := s.readings.Bucketed(key, start, end, bucket)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sensor_key": key, "interval": q.Get("interval"), "bucket_seconds": int(bucket.Seconds()), "aggregates": aggs})
 	}
 }
 

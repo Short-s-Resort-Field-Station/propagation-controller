@@ -103,3 +103,58 @@ func (r *ReadingRepo) List(sensorKey string, from, to *time.Time, limit int) ([]
 	}
 	return out, rows.Err()
 }
+
+// Bucketed summarises raw readings into fixed-width buckets (min / avg / max
+// / count) — the sub-hour resolution the dashboard's 24-hour timeline wants
+// (Austin, 2026-11-11: detailed charts with peaks and lows). It reuses the
+// hourly aggregate's shape so the client reads one format; HourStart is the
+// bucket start. Bucket boundaries are aligned to UTC multiples of the width.
+func (r *ReadingRepo) Bucketed(sensorKey string, from, to time.Time, bucket time.Duration) ([]HourlyAggregate, error) {
+	if bucket < time.Minute {
+		bucket = time.Minute
+	}
+	rows, err := r.db.Query(
+		`SELECT value, unit, read_at FROM sensor_readings
+		 WHERE sensor_key = ? AND read_at >= ? AND read_at <= ? ORDER BY read_at ASC, id ASC`,
+		sensorKey, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []HourlyAggregate{}
+	var cur *HourlyAggregate
+	var sum float64
+	flush := func() {
+		if cur != nil && cur.SampleCount > 0 {
+			avg := sum / float64(cur.SampleCount)
+			cur.AvgValue = &avg
+			out = append(out, *cur)
+		}
+		cur, sum = nil, 0
+	}
+	for rows.Next() {
+		var v float64
+		var unit string
+		var at time.Time
+		if err := rows.Scan(&v, &unit, &at); err != nil {
+			return nil, err
+		}
+		start := at.UTC().Truncate(bucket)
+		if cur == nil || !cur.HourStart.Equal(start) {
+			flush()
+			mn, mx := v, v
+			cur = &HourlyAggregate{SensorKey: sensorKey, HourStart: start, MinValue: &mn, MaxValue: &mx, Unit: unit}
+		}
+		if v < *cur.MinValue {
+			*cur.MinValue = v
+		}
+		if v > *cur.MaxValue {
+			*cur.MaxValue = v
+		}
+		cur.SampleCount++
+		sum += v
+	}
+	flush()
+	return out, rows.Err()
+}

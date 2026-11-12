@@ -83,6 +83,10 @@ export const api = {
   readings: (sensorKey, limit = 500) => req(`/sensors/${sensorKey}/readings?limit=${limit}`),
   aggregates: (sensorKey, fromISO) =>
     req(`/sensors/${sensorKey}/readings?interval=hour&from=${encodeURIComponent(fromISO)}`),
+  // Timeline series (2026-11-11): interval "hour" = stored hourly aggregates
+  // (limit covers a season), or a bucket width like "5m" for the 24-hour view.
+  series: (sensorKey, fromISO, interval = 'hour') =>
+    req(`/sensors/${sensorKey}/readings?interval=${encodeURIComponent(interval)}&from=${encodeURIComponent(fromISO)}&limit=2400`),
   lightingSchedule: () => req('/lighting/schedule'),
   settings: () => req('/settings'),
   putSettings: (body) => req('/settings', {

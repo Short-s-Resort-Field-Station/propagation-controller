@@ -732,6 +732,15 @@
   .chart-card .ch-leg span{display:flex;align-items:center;gap:6px}
   .chart-card .ch-leg i{width:14px;height:3px;display:block}
   .chart-card .cb{padding:14px 16px 8px}
+  /* timeline chart (2026-11-11): hover readout */
+  .tc-wrap{position:relative;width:100%;cursor:crosshair}
+  .tc-tip{position:absolute;pointer-events:none;background:var(--bone);border:1px solid var(--ink);padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:10.5px;min-width:160px;z-index:3;box-shadow:2px 2px 0 #1B181322}
+  .tc-tip-t{font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:#1B181399;margin-bottom:6px;white-space:nowrap}
+  .tc-tip-r{display:grid;grid-template-columns:10px 1fr auto;gap:0 8px;align-items:baseline;margin-top:3px}
+  .tc-tip-r i{width:10px;height:3px;display:block}
+  .tc-tip-r b{font-family:"Zilla Slab",serif;font-weight:900;font-size:13px}
+  .tc-tip-r b small{font-size:9px;font-weight:400;margin-left:2px}
+  .tc-tip-r em{grid-column:2/4;color:#1B181399;font-size:9px;font-style:normal}
 
   /* controls */
   .ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
@@ -884,16 +893,6 @@
   .apply-bar{display:flex;align-items:center;gap:12px;margin-top:22px;flex-wrap:wrap}
   .ctrl-row input:disabled{opacity:.4}
   /* Environmental dials (2026-11-10): the rack face's gauges on paper. */
-  .env-grow{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px 16px 14px}
-  .env-gcell{text-align:center}
-  .env-gcell .k{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:#1B181399;margin-bottom:6px}
-  .env-gwrap{position:relative}
-  .env-greadout{position:absolute;left:0;right:0;top:50%;transform:translateY(-32%);text-align:center;pointer-events:none}
-  .env-greadout b{font-family:"Zilla Slab",serif;font-weight:900;font-size:24px;display:block;line-height:1}
-  .env-greadout small{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#1B181399}
-  .env-greadout .np,.env-gtgt .np{color:#1B181366}
-  .env-gtgt{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:#1B181399;margin-top:8px}
-  .env-gtgt b{color:var(--ink);font-weight:600}
   @media (max-width:900px){.env-grow{grid-template-columns:1fr}}
   /* Rack Controls (2026-11-10): three rack-wide panels over one shelf panel. */
   .ctrl-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:24px;align-items:start}

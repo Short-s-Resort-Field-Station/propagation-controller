@@ -2,7 +2,7 @@ import React from 'react';
 import { PG, ForestMark, EventBars } from './data.jsx';
 import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner } from './flows.jsx';
 import { ControlsTab } from './controls.jsx';
-import { DialGauge } from './rack2.jsx';
+import { TimeChart } from './timechart.jsx';
 
 // pgui-dashboard.jsx — the web dashboard (paper). Tabs:
 // Dashboard · Shelf Management · Environmental · Controls
@@ -191,47 +191,27 @@ function ShelvesTab({ shelves, onAssign, onEdit, onSetEnabled, onUnassign, role 
 }
 
 // ---------- ENVIRONMENTAL ----------
-// With getSeries (the live build) the charts render hourly aggregates from
-// the backend; without it they fall back to the handoff's demo series.
-// Austin (2026-11-10): the dashboard shows the control unit's dials, not
-// line charts. One row per shelf — moisture vs. its rule band, root-zone
-// temperature vs. its happy-band (dial spans 60–90 °F), substrate EC vs. its
-// band (dial spans 0–3000 µS/cm) — the same DialGauge the rack face draws,
-// on paper colours.
-const GAUGE_VARS = { '--sline':'#1B18133D', '--sline-soft':'#1B18131F', '--sink':'#1B1813', '--sfaint':'#1B18135E' };
-function GaugeCell({ label, value, lo, hi, accent, active, readout, unit, target }){
+// With getSeries (the live build) the charts render the backend's readings:
+// 5-minute buckets for the 24-hour view, hourly aggregates beyond. Austin
+// (2026-11-11): line charts, not dials — a real date axis that scales with
+// the window, the period's peak and low labelled, hover for the numbers.
+const HOURS = { '24 Hours':24, '7 Days':168, '30 Days':720, 'Season':2160 };
+function MetricChart({ title, unit, color, series, y, range, fmtY, period }){
   return (
-    <div className="env-gcell">
-      <div className="k">{label}</div>
-      <div className="env-gwrap">
-        <DialGauge value={value} lo={lo} hi={hi} accent={accent} size={118} marker active={active} bg="var(--paper)"/>
-        <div className="env-greadout">{active ? <React.Fragment><b>{readout}</b><small style={unit.startsWith('µ')?{textTransform:'none'}:undefined}>{unit}</small></React.Fragment> : <b className="np">—</b>}</div>
-      </div>
-      <div className="env-gtgt">{target}</div>
-    </div>
-  );
-}
-function ShelfGauges({ s }){
-  const tN = s.temp>0 ? Math.max(0, Math.min(100, (s.temp-60)/30*100)) : 0;
-  return (
-    <div className="chart-card env-gauges" style={GAUGE_VARS}>
+    <div className="chart-card">
       <div className="ch-h">
-        <div className="ch-t"><span className="sw" style={{background:s.stripe||'var(--river)'}}></span>Shelf {s.n} · <span style={{textTransform:'none'}}>{s.species}</span></div>
-        <div className="ch-leg"><span className="mono">{s.status || ''}</span></div>
+        <div className="ch-t"><span className="sw" style={{background:color}}></span>{title} · <span style={{textTransform:'none'}}>{unit}</span></div>
+        <div className="ch-leg">
+          {series.map(s=><span key={s.label}><i style={{background:s.color}}></i>{s.label}</span>)}
+          <span className="mono">{period}</span>
+        </div>
       </div>
-      <div className="env-grow">
-        <GaugeCell label="Soil Moisture" value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent="var(--river)" active={!!s.probe}
-          readout={s.moisture} unit="%VWC" target={s.hasRule===false ? <span className="np">Rule · not set</span> : <React.Fragment>Water below <b>{s.lo}%</b> · re-arm <b>{s.hi}%</b></React.Fragment>}/>
-        <GaugeCell label="Root Zone Temp" value={tN} lo={s.tempBand?(s.tempBand[0]-60)/30*100:40} hi={s.tempBand?(s.tempBand[1]-60)/30*100:60} accent="var(--ochre-deep)" active={s.temp>0}
-          readout={s.temp} unit="°F" target={s.tempBand ? <React.Fragment>Band · <b>{s.tempBand[0]}–{s.tempBand[1]}°F</b></React.Fragment> : <span className="np">Band · not set</span>}/>
-        <GaugeCell label="Substrate EC" value={s.ec!=null ? Math.min(100,(s.ec/3000)*100) : 0} lo={s.ecBand?(s.ecBand[0]/3000)*100:(500/3000)*100} hi={s.ecBand?(s.ecBand[1]/3000)*100:(1500/3000)*100} accent="var(--sage-deep)" active={s.ec!=null}
-          readout={s.ec} unit="µS/cm" target={s.ecBand ? <React.Fragment>Band · <b>{s.ecBand[0]}–{s.ecBand[1]} <span style={{textTransform:'none'}}>µS/cm</span></b></React.Fragment> : <span className="np">Band · not set</span>}/>
-      </div>
+      <div className="cb"><TimeChart series={series} fromMs={range.fromMs} toMs={range.toMs} yMin={y[0]} yMax={y[1]} fmtY={fmtY} unit={unit==='%VWC'?'%':unit==='°F'?'°':''}/></div>
     </div>
   );
 }
 
-function EnvironmentalTab({ getSeries, shelves=[] }){
+function EnvironmentalTab({ getSeries }){
   const [period, setPeriod] = React.useState('7 Days');
   const periods = ['24 Hours','7 Days','30 Days','Season'];
   const [live, setLive] = React.useState(null);
@@ -243,6 +223,7 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
   }, [period, getSeries]);
 
   const isLive = !!(getSeries && live);
+  const range = isLive && live.range ? live.range : { fromMs: Date.now()-(HOURS[period]||168)*3600e3, toMs: Date.now() };
   const waterEvents = isLive ? live.water : PG.series((periods.indexOf(period)+1)*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
   return (
     <div>
@@ -257,9 +238,12 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
         </div>
       </div>
 
-      {(shelves.length ? shelves : []).filter(sh=>sh.active || sh.assigned).map(sh=> <ShelfGauges key={sh.n} s={sh}/>)}
-      {!shelves.some(sh=>sh.active || sh.assigned) &&
-        <div className="chart-card"><div className="cb" style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',padding:'26px 0',textAlign:'center'}}>No shelf assigned yet — assign a specimen group and its dials appear here.</div></div>}
+      <MetricChart title="Soil Moisture" unit="%VWC" color="var(--river)" period={period} range={range}
+        series={isLive ? live.moist : []} y={isLive ? live.moistY : [0,60]} fmtY={v=>v}/>
+      <MetricChart title="Root Zone Temperature" unit="°F" color="var(--ochre-deep)" period={period} range={range}
+        series={isLive ? live.temp : []} y={isLive ? live.tempY : [60,90]} fmtY={v=>v}/>
+      <MetricChart title="Substrate EC" unit="µS/cm" color="var(--sage-deep)" period={period} range={range}
+        series={isLive ? live.ec : []} y={isLive ? live.ecY : [0,1000]} fmtY={v=>Math.round(v)}/>
 
       <div className="chart-card">
         <div className="ch-h">
@@ -415,7 +399,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           onSetEnabled={onSetEnabled}
           onUnassign={onUnassign}
           role={role}/>}
-        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries} shelves={effShelves}/>}
+        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries}/>}
         {tab==='Controls' && <ControlsTab role={role} controls={controls}/>}
       </div>
 

@@ -1,83 +1,77 @@
-// Environmental-tab series built from the hourly aggregates API (Phase 7).
+// Environmental-tab series built from the readings API (Phase 7; timeline
+// rebuild 2026-11-11). Every metric is a set of time-stamped points per shelf
+// — { t, v, lo, hi } — so the charts draw a true date axis: 5-minute buckets
+// of raw readings for the 24-hour view, hourly aggregates beyond that.
 
 import { api } from './api.js';
 import { cToF, siblingKey } from './adapter.js';
 
-const HOURS = { '24 Hours': 24, '7 Days': 168, '30 Days': 720, 'Season': 2160 };
+export const WINDOWS = {
+  '24 Hours': { hours: 24, interval: '5m' },
+  '7 Days': { hours: 168, interval: 'hour' },
+  '30 Days': { hours: 720, interval: 'hour' },
+  'Season': { hours: 2160, interval: 'hour' },
+};
 const COLORS = ['var(--river)', 'var(--ochre)', 'var(--sage)', 'var(--oxblood)'];
 
-// LineChart needs >= 2 points to draw a path.
-const pad = (data) => (data.length === 1 ? [data[0], data[0]] : data);
+const toPoints = (aggs, fn) => (aggs || [])
+  .filter((a) => a.avg_value != null)
+  .map((a) => ({
+    t: new Date(a.hour_start).getTime(),
+    v: fn(a.avg_value),
+    lo: fn(a.min_value != null ? a.min_value : a.avg_value),
+    hi: fn(a.max_value != null ? a.max_value : a.avg_value),
+  }));
 
-function bounds(datasets, defLo, defHi) {
-  const all = datasets.flatMap((d) => d.data);
-  if (!all.length) return [defLo, defHi];
-  const lo = Math.min(...all), hi = Math.max(...all);
-  const margin = Math.max(2, (hi - lo) * 0.25);
-  return [Math.floor(lo - margin), Math.ceil(hi + margin)];
+// Y range that hugs the data (band included) with a margin, snapped to `step`.
+export function yBounds(series, defLo, defHi, step = 1, floor = null) {
+  const los = series.flatMap((s) => s.points.map((p) => p.lo));
+  const his = series.flatMap((s) => s.points.map((p) => p.hi));
+  if (!los.length) return [defLo, defHi];
+  const lo = Math.min(...los), hi = Math.max(...his);
+  const margin = Math.max(step * 2, (hi - lo) * 0.2);
+  let a = Math.floor((lo - margin) / step) * step;
+  let b = Math.ceil((hi + margin) / step) * step;
+  if (floor != null) a = Math.max(floor, a);
+  if (b - a < step * 4) b = a + step * 4;
+  return [a, b];
 }
 
-export async function getEnvSeries(period, shelves) {
-  const hours = HOURS[period] || 168;
-  const fromMs = Date.now() - hours * 3600e3;
-  const from = new Date(fromMs).toISOString();
-
-  const moist = [];
-  const legend = [];
-  // Audit 3.8: every series is keyed off the shelf's own probe key
-  // (soil_sensor_key), never the array index / shelf number.
-  const active = shelves.filter((x) => x.active && x.sensorKey);
+// One metric across the active shelves. Audit 3.8: every series is keyed off
+// the shelf's own probe key (soil_sensor_key), never the shelf number.
+async function metric(active, channel, fn, from, interval, colorOffset) {
+  const series = [];
+  const byShelf = {};
   for (const s of active) {
     try {
-      const r = await api.aggregates(s.sensorKey, from);
-      const data = (r.aggregates || []).map((a) => Math.round(a.avg_value * 10) / 10);
-      if (data.length) {
-        const color = COLORS[moist.length % COLORS.length];
-        moist.push({ color, fill: moist.length === 0, data: pad(data) });
-        legend.push({ color, label: `Shelf ${s.n}` });
+      const key = channel ? siblingKey(s.sensorKey, channel) : s.sensorKey;
+      const r = await api.series(key, from, interval);
+      const points = toPoints(r.aggregates, fn);
+      if (points.length) {
+        byShelf[s.n] = points.map((p) => p.v);
+        series.push({ color: COLORS[(series.length + colorOffset) % COLORS.length], label: `Shelf ${s.n}`, points });
       }
     } catch { /* no probe / no data for this shelf */ }
   }
+  return { series, byShelf };
+}
 
+export async function getEnvSeries(period, shelves) {
+  const win = WINDOWS[period] || WINDOWS['7 Days'];
+  const toMs = Date.now();
+  const fromMs = toMs - win.hours * 3600e3;
+  const from = new Date(fromMs).toISOString();
+  const active = shelves.filter((x) => x.active && x.sensorKey);
+
+  const moist = await metric(active, null, (v) => Math.round(v * 10) / 10, from, win.interval, 0);
   // Root-zone temperature per shelf (each probe has its own channel since the
   // 2026-11-09 build); adherence scores each shelf against its own trace.
-  const temp = [];
-  const tempLegend = [];
-  const tempByShelf = {}; // change 3: raw °F buckets per shelf, reused for adherence
-  for (const s of active) {
-    try {
-      const r = await api.aggregates(siblingKey(s.sensorKey, 'temperature'), from);
-      const data = (r.aggregates || []).map((a) => cToF(a.avg_value));
-      if (data.length) {
-        tempByShelf[s.n] = data;
-        const color = COLORS[(temp.length + 3) % COLORS.length];
-        temp.push({ color, fill: temp.length === 0, data: pad(data) });
-        tempLegend.push({ color, label: `Shelf ${s.n}` });
-      }
-    } catch { /* no temperature data for this shelf */ }
-  }
+  const temp = await metric(active, 'temperature', cToF, from, win.interval, 3);
+  // Substrate EC (µS/cm) — the ZTS-3000 probes measure conductivity directly.
+  const ec = await metric(active, 'ec', (v) => Math.round(v), from, win.interval, 2);
 
-  // Substrate EC per shelf (µS/cm) — the ZTS-3000 probes measure conductivity
-  // directly (register 2); there is no pH channel on this hardware.
-  const ec = [];
-  const ecLegend = [];
-  const ecByShelf = {}; // change 3: raw EC buckets per shelf, reused for adherence
-  for (const s of active) {
-    try {
-      const r = await api.aggregates(siblingKey(s.sensorKey, 'ec'), from);
-      const data = (r.aggregates || []).map((a) => Math.round(a.avg_value));
-      if (data.length) {
-        ecByShelf[s.n] = data;
-        const color = COLORS[(ec.length + 2) % COLORS.length];
-        ec.push({ color, fill: ec.length === 0, data: pad(data) });
-        ecLegend.push({ color, label: `Shelf ${s.n}` });
-      }
-    } catch { /* no EC data for this shelf */ }
-  }
-
-  // change 3: time-in-target — share of hourly buckets inside each shelf's
-  // happy-band, over the selected period (monitoring only). Each shelf is
-  // scored against its own EC and temperature traces.
+  // change 3: time-in-target — share of buckets inside each shelf's
+  // happy-band over the selected period (monitoring only).
   const inBand = (arr, band) => {
     if (!band || !arr || !arr.length) return null;
     const [b0, b1] = band;
@@ -85,37 +79,29 @@ export async function getEnvSeries(period, shelves) {
   };
   const adherence = shelves.filter((x) => x.active).map((s) => ({
     n: s.n,
-    ecBand: s.ecBand || null, ec: inBand(ecByShelf[s.n], s.ecBand),
-    tempBand: s.tempBand || null, temp: inBand(tempByShelf[s.n], s.tempBand),
+    ecBand: s.ecBand || null, ec: inBand(ec.byShelf[s.n], s.ecBand),
+    tempBand: s.tempBand || null, temp: inBand(temp.byShelf[s.n], s.tempBand),
   })).filter((a) => a.ec || a.temp);
 
-  // Watering events: minutes of actual watering per bucket across the range.
+  // Watering events: minutes of actual pump time per bucket across the range.
   let water = new Array(14).fill(0);
   try {
     const r = await api.cycles(500);
     for (const c of r.cycles || []) {
       const t = new Date(c.started_at).getTime();
       if (t < fromMs || c.result === 'locked_out') continue;
-      const idx = Math.min(13, Math.floor((t - fromMs) / (hours * 3600e3 / 14)));
+      const idx = Math.min(13, Math.floor((t - fromMs) / (win.hours * 3600e3 / 14)));
       water[idx] += (c.actual_duration_seconds || 0) / 60;
     }
     water = water.map((v) => Math.round(v * 10) / 10);
   } catch { /* cycles unavailable */ }
 
   return {
-    moist, temp, tempLegend, water, legend, ec, ecLegend, adherence,
-    moistY: bounds(moist, 20, 80),
-    tempY: bounds(temp, 68, 82),
-    ecY: ecBounds(ec),
+    range: { fromMs, toMs },
+    moist: moist.series, temp: temp.series, ec: ec.series,
+    moistY: yBounds(moist.series, 0, 60, 5, 0),
+    tempY: yBounds(temp.series, 60, 90, 2),
+    ecY: yBounds(ec.series, 0, 1000, 50, 0),
+    water, adherence,
   };
-}
-
-// EC wants bounds that hug the data (propagation substrate sits in the
-// hundreds of µS/cm; a 0–3000 window would flatten the trace).
-function ecBounds(datasets) {
-  const all = datasets.flatMap((d) => d.data);
-  if (!all.length) return [0, 3000];
-  const lo = Math.min(...all), hi = Math.max(...all);
-  const margin = Math.max(100, (hi - lo) * 0.5);
-  return [Math.max(0, Math.round((lo - margin) / 50) * 50), Math.round((hi + margin) / 50) * 50];
 }
