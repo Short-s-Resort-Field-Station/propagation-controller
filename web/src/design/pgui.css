@@ -732,6 +732,11 @@
   .chart-card .ch-leg span{display:flex;align-items:center;gap:6px}
   .chart-card .ch-leg i{width:14px;height:3px;display:block}
   .chart-card .cb{padding:14px 16px 8px}
+  /* environmental: one section per shelf (2026-11-11) */
+  .env-shelf{margin-top:34px}
+  .env-shelf-h{font-family:"Zilla Slab",serif;font-weight:900;font-size:19px;text-transform:uppercase;letter-spacing:0.01em;display:flex;align-items:center;gap:10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+  .env-shelf-h .sw{width:16px;height:16px;border-radius:3px}
+  .env-shelf .chart-card{margin-top:14px}
   /* timeline chart (2026-11-11): hover readout */
   .tc-wrap{position:relative;width:100%;cursor:crosshair}
   .tc-tip{position:absolute;pointer-events:none;background:var(--bone);border:1px solid var(--ink);padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:10.5px;min-width:160px;z-index:3;box-shadow:2px 2px 0 #1B181322}
@@ -741,6 +746,7 @@
   .tc-tip-r b{font-family:"Zilla Slab",serif;font-weight:900;font-size:13px}
   .tc-tip-r b small{font-size:9px;font-weight:400;margin-left:2px}
   .tc-tip-r em{grid-column:2/4;color:#1B181399;font-size:9px;font-style:normal}
+  .tc-tip-run{color:var(--river-deep);font-size:9.5px;margin-bottom:5px;padding-bottom:5px;border-bottom:1px dashed #1B181333}
 
   /* controls */
   .ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}

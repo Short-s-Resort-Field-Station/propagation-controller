@@ -42,3 +42,10 @@ describe('nearest', () => {
     expect(nearest(pts, 99)).toBe(pts[2]);
   });
 });
+
+describe('mean', () => {
+  it('averages the bucket values with equal weight', async () => {
+    const { mean } = await import('./timechart.jsx');
+    expect(mean([{ v: 10 }, { v: 20 }, { v: 60 }])).toBe(30);
+  });
+});

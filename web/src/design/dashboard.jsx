@@ -196,22 +196,40 @@ function ShelvesTab({ shelves, onAssign, onEdit, onSetEnabled, onUnassign, role 
 // (2026-11-11): line charts, not dials — a real date axis that scales with
 // the window, the period's peak and low labelled, hover for the numbers.
 const HOURS = { '24 Hours':24, '7 Days':168, '30 Days':720, 'Season':2160 };
-function MetricChart({ title, unit, color, series, y, range, fmtY, period }){
+function MetricChart({ title, unit, color, series, y, range, fmtY, period, runs=[] }){
+  const tinted = series.map(s=>({ ...s, color }));
+  const tgt = tinted.find(s=>s.target);
   return (
     <div className="chart-card">
       <div className="ch-h">
         <div className="ch-t"><span className="sw" style={{background:color}}></span>{title} · <span style={{textTransform:'none'}}>{unit}</span></div>
         <div className="ch-leg">
-          {series.map(s=><span key={s.label}><i style={{background:s.color}}></i>{s.label}</span>)}
+          {tgt ? <span>ideal {tgt.target[0]}–{tgt.target[1]}</span> : <span>no target set</span>}
+          <span>avg · dashed</span>
+          <span><i style={{background:'var(--river-deep)',width:6,height:8,borderRadius:'50% 50% 50% 50% / 30% 30% 70% 70%'}}></i>watered</span>
           <span className="mono">{period}</span>
         </div>
       </div>
-      <div className="cb"><TimeChart series={series} fromMs={range.fromMs} toMs={range.toMs} yMin={y[0]} yMax={y[1]} fmtY={fmtY} unit={unit==='%VWC'?'%':unit==='°F'?'°':''}/></div>
+      <div className="cb"><TimeChart series={tinted} runs={runs} fromMs={range.fromMs} toMs={range.toMs} yMin={y[0]} yMax={y[1]} fmtY={fmtY} unit={unit==='%VWC'?'%':unit==='°F'?'°':''} h={200}/></div>
+    </div>
+  );
+}
+// Each shelf gets its own section — its three traces, nothing else's.
+function ShelfSection({ ps, shelf, range, period }){
+  return (
+    <div className="env-shelf">
+      <div className="env-shelf-h"><span className="sw" style={{background:shelf.stripe||'var(--river)'}}></span>Shelf {ps.n} · <span style={{textTransform:'none'}}>{shelf.species||''}</span></div>
+      <MetricChart title="Soil Moisture" unit="%VWC" color="var(--river)" period={period} range={range} runs={ps.runs}
+        series={ps.moist.series} y={ps.moist.y} fmtY={v=>v}/>
+      <MetricChart title="Root Zone Temperature" unit="°F" color="var(--ochre-deep)" period={period} range={range} runs={ps.runs}
+        series={ps.temp.series} y={ps.temp.y} fmtY={v=>v}/>
+      <MetricChart title="Substrate EC" unit="µS/cm" color="var(--sage-deep)" period={period} range={range} runs={ps.runs}
+        series={ps.ec.series} y={ps.ec.y} fmtY={v=>Math.round(v)}/>
     </div>
   );
 }
 
-function EnvironmentalTab({ getSeries }){
+function EnvironmentalTab({ getSeries, shelves=[] }){
   const [period, setPeriod] = React.useState('7 Days');
   const periods = ['24 Hours','7 Days','30 Days','Season'];
   const [live, setLive] = React.useState(null);
@@ -238,12 +256,11 @@ function EnvironmentalTab({ getSeries }){
         </div>
       </div>
 
-      <MetricChart title="Soil Moisture" unit="%VWC" color="var(--river)" period={period} range={range}
-        series={isLive ? live.moist : []} y={isLive ? live.moistY : [0,60]} fmtY={v=>v}/>
-      <MetricChart title="Root Zone Temperature" unit="°F" color="var(--ochre-deep)" period={period} range={range}
-        series={isLive ? live.temp : []} y={isLive ? live.tempY : [60,90]} fmtY={v=>v}/>
-      <MetricChart title="Substrate EC" unit="µS/cm" color="var(--sage-deep)" period={period} range={range}
-        series={isLive ? live.ec : []} y={isLive ? live.ecY : [0,1000]} fmtY={v=>Math.round(v)}/>
+      {(isLive && live.perShelf ? live.perShelf : []).map(ps=>(
+        <ShelfSection key={ps.n} ps={ps} shelf={shelves.find(x=>String(x.n)===String(ps.n))||{}} range={range} period={period}/>
+      ))}
+      {!(isLive && live.perShelf && live.perShelf.length) &&
+        <div className="chart-card"><div className="cb" style={{fontFamily:'Newsreader',fontStyle:'italic',color:'var(--char)',padding:'26px 0',textAlign:'center'}}>No readings yet for this window — each assigned shelf gets its own section here.</div></div>}
 
       <div className="chart-card">
         <div className="ch-h">
@@ -399,7 +416,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           onSetEnabled={onSetEnabled}
           onUnassign={onUnassign}
           role={role}/>}
-        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries}/>}
+        {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries} shelves={effShelves}/>}
         {tab==='Controls' && <ControlsTab role={role} controls={controls}/>}
       </div>
 

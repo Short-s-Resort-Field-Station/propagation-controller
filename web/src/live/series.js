@@ -25,8 +25,9 @@ const toPoints = (aggs, fn) => (aggs || [])
 
 // Y range that hugs the data (band included) with a margin, snapped to `step`.
 export function yBounds(series, defLo, defHi, step = 1, floor = null) {
-  const los = series.flatMap((s) => s.points.map((p) => p.lo));
-  const his = series.flatMap((s) => s.points.map((p) => p.hi));
+  // Include each shelf's target band so the ideal range is always on screen.
+  const los = series.flatMap((s) => s.points.map((p) => p.lo).concat(s.target ? [s.target[0]] : []));
+  const his = series.flatMap((s) => s.points.map((p) => p.hi).concat(s.target ? [s.target[1]] : []));
   if (!los.length) return [defLo, defHi];
   const lo = Math.min(...los), hi = Math.max(...his);
   const margin = Math.max(step * 2, (hi - lo) * 0.2);
@@ -39,7 +40,9 @@ export function yBounds(series, defLo, defHi, step = 1, floor = null) {
 
 // One metric across the active shelves. Audit 3.8: every series is keyed off
 // the shelf's own probe key (soil_sensor_key), never the shelf number.
-async function metric(active, channel, fn, from, interval, colorOffset) {
+// `target(shelf)` returns the shelf's ideal [lo, hi] for this metric (or null)
+// — drawn as a band through the chart (Austin, 2026-11-11).
+async function metric(active, channel, fn, from, interval, colorOffset, target = () => null) {
   const series = [];
   const byShelf = {};
   for (const s of active) {
@@ -49,7 +52,7 @@ async function metric(active, channel, fn, from, interval, colorOffset) {
       const points = toPoints(r.aggregates, fn);
       if (points.length) {
         byShelf[s.n] = points.map((p) => p.v);
-        series.push({ color: COLORS[(series.length + colorOffset) % COLORS.length], label: `Shelf ${s.n}`, points });
+        series.push({ n: s.n, color: COLORS[(series.length + colorOffset) % COLORS.length], label: `Shelf ${s.n}`, points, target: target(s) });
       }
     } catch { /* no probe / no data for this shelf */ }
   }
@@ -63,12 +66,15 @@ export async function getEnvSeries(period, shelves) {
   const from = new Date(fromMs).toISOString();
   const active = shelves.filter((x) => x.active && x.sensorKey);
 
-  const moist = await metric(active, null, (v) => Math.round(v * 10) / 10, from, win.interval, 0);
+  const band = (b) => (Array.isArray(b) && b.length === 2 && b[0] != null && b[1] != null && b[1] > b[0] ? [b[0], b[1]] : null);
+  // Moisture's ideal = the shelf's rule: water below `lo`, re-armed above `hi`.
+  const moist = await metric(active, null, (v) => Math.round(v * 10) / 10, from, win.interval, 0,
+    (s) => (s.hasRule === false ? null : band([s.lo, s.hi])));
   // Root-zone temperature per shelf (each probe has its own channel since the
   // 2026-11-09 build); adherence scores each shelf against its own trace.
-  const temp = await metric(active, 'temperature', cToF, from, win.interval, 3);
+  const temp = await metric(active, 'temperature', cToF, from, win.interval, 3, (s) => band(s.tempBand));
   // Substrate EC (µS/cm) — the ZTS-3000 probes measure conductivity directly.
-  const ec = await metric(active, 'ec', (v) => Math.round(v), from, win.interval, 2);
+  const ec = await metric(active, 'ec', (v) => Math.round(v), from, win.interval, 2, (s) => band(s.ecBand));
 
   // change 3: time-in-target — share of buckets inside each shelf's
   // happy-band over the selected period (monitoring only).
@@ -83,21 +89,48 @@ export async function getEnvSeries(period, shelves) {
     tempBand: s.tempBand || null, temp: inBand(temp.byShelf[s.n], s.tempBand),
   })).filter((a) => a.ec || a.temp);
 
-  // Watering events: minutes of actual pump time per bucket across the range.
+  // Watering events: minutes of actual pump time per bucket across the range,
+  // plus every pump run per zone for the timeline markers (Austin,
+  // 2026-11-11: mark when the pump ran). Drains and purges never run the
+  // pump (actual 0) and are left off the charts.
   let water = new Array(14).fill(0);
+  const runsByZone = {};
   try {
-    const r = await api.cycles(500);
+    const r = await api.cycles(2000);
     for (const c of r.cycles || []) {
       const t = new Date(c.started_at).getTime();
-      if (t < fromMs || c.result === 'locked_out') continue;
+      // A watering still in progress has no actual duration yet: count it
+      // from its start so the drop shows up as soon as the pump starts.
+      const secs = c.actual_duration_seconds != null ? c.actual_duration_seconds
+        : (c.result === 'running' && c.trigger_source !== 'drain' && c.trigger_source !== 'purge' ? Math.max(1, (Date.now() - t) / 1000) : 0);
+      if (t < fromMs || c.result === 'locked_out' || secs <= 0) continue;
       const idx = Math.min(13, Math.floor((t - fromMs) / (win.hours * 3600e3 / 14)));
-      water[idx] += (c.actual_duration_seconds || 0) / 60;
+      water[idx] += secs / 60;
+      (runsByZone[c.zone_key] = runsByZone[c.zone_key] || []).push({
+        t0: t, t1: t + secs * 1000, mins: Math.round(secs / 6) / 10,
+        source: c.trigger_source || c.trigger_type || '', result: c.result || '',
+      });
     }
     water = water.map((v) => Math.round(v * 10) / 10);
   } catch { /* cycles unavailable */ }
 
+  // One section per shelf (Austin, 2026-11-11: keep the data readable) —
+  // each shelf's three traces with Y bounds that hug that shelf alone.
+  const perShelf = active.map((s) => {
+    const pick = (m) => m.series.filter((x) => x.n === s.n);
+    const mo = pick(moist), te = pick(temp), e = pick(ec);
+    return {
+      n: s.n,
+      runs: (runsByZone[s.zoneKey] || []).sort((a, b) => a.t0 - b.t0),
+      moist: { series: mo, y: yBounds(mo, 0, 60, 5, 0) },
+      temp: { series: te, y: yBounds(te, 60, 90, 2) },
+      ec: { series: e, y: yBounds(e, 0, 1000, 50, 0) },
+    };
+  }).filter((p) => p.moist.series.length || p.temp.series.length || p.ec.series.length);
+
   return {
     range: { fromMs, toMs },
+    perShelf,
     moist: moist.series, temp: temp.series, ec: ec.series,
     moistY: yBounds(moist.series, 0, 60, 5, 0),
     tempY: yBounds(temp.series, 60, 90, 2),

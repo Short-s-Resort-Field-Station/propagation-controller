@@ -73,11 +73,18 @@ const extremes = (points) => {
   return { mx, mn };
 };
 
-export function TimeChart({ series = [], fromMs, toMs, yMin = 0, yMax = 100, fmtY = (v) => v, unit = '', h = 230, bands = true }) {
+// Window average of a trace (equal weight per bucket).
+export const mean = (points) => points.reduce((a, p) => a + p.v, 0) / points.length;
+
+// `runs` = waterings of this shelf: { t0, t1, mins, source } — each drawn as
+// a water drop on the baseline where it started (Austin, 2026-11-11: "a
+// symbolic drop of water"), named in the hover readout.
+const DROP = 'M0,-9 C3.6,-4.2 5.6,-1.4 5.6,1.6 A5.6,5.6 0 1 1 -5.6,1.6 C-5.6,-1.4 -3.6,-4.2 0,-9 Z';
+export function TimeChart({ series = [], runs = [], fromMs, toMs, yMin = 0, yMax = 100, fmtY = (v) => v, unit = '', h = 230, bands = true, averages = true }) {
   const wrap = React.useRef(null);
   const w = useWidth(wrap);
   const [hover, setHover] = React.useState(null);
-  const padL = 46, padR = 18, padT = 18, padB = 40;
+  const padL = 46, padR = 58, padT = 18, padB = 40;
   const iw = Math.max(10, w - padL - padR), ih = h - padT - padB;
   const span = Math.max(1, toMs - fromMs);
   const X = (t) => padL + iw * ((t - fromMs) / span);
@@ -97,6 +104,9 @@ export function TimeChart({ series = [], fromMs, toMs, yMin = 0, yMax = 100, fmt
   const drawn = series.filter((s) => s.points && s.points.length);
   const rows = hover != null ? drawn.map((s) => ({ ...s, p: nearest(s.points, hover) })) : [];
   const hx = rows.length ? X(rows[0].p.t) : null;
+  // A run counts as hovered inside its strip, or within a few pixels of it.
+  const tol = span * (7 / iw);
+  const hoverRun = hover != null ? runs.find((r) => hover >= r.t0 - tol && hover <= Math.max(r.t1, r.t0 + tol)) : null;
   const flip = hx != null && hx > w * 0.62;
   const fmt = (v) => fmtY(Math.round(v * 10) / 10);
 
@@ -116,6 +126,21 @@ export function TimeChart({ series = [], fromMs, toMs, yMin = 0, yMax = 100, fmt
             {tk.sub && <text x={X(tk.t)} y={padT + ih + 26} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="8.5" fill="#1B181399">{tk.sub}</text>}
           </g>
         ))}
+        {runs.filter((r) => r.t0 >= fromMs && r.t0 <= toMs).map((r, k) => (
+          <g key={'run' + k} transform={`translate(${X(r.t0).toFixed(1)} ${(padT + ih - 7).toFixed(1)})`}>
+            <path d={DROP} fill="var(--river-deep)" stroke="var(--paper)" strokeWidth="1" opacity={hoverRun === r ? 1 : 0.85}/>
+          </g>
+        ))}
+        {/* Ideal band per shelf (Austin, 2026-11-11): the shelf's target
+            range for this metric, shaded across the whole window. */}
+        {drawn.map((s, k) => s.target ? (
+          <g key={'tgt' + k}>
+            <rect x={padL} y={Y(s.target[1])} width={iw} height={Math.max(1, Y(s.target[0]) - Y(s.target[1]))} fill={s.color} opacity="0.09"/>
+            <line x1={padL} y1={Y(s.target[1])} x2={w - padR} y2={Y(s.target[1])} stroke={s.color} strokeWidth="1" strokeDasharray="2 3" opacity="0.5"/>
+            <line x1={padL} y1={Y(s.target[0])} x2={w - padR} y2={Y(s.target[0])} stroke={s.color} strokeWidth="1" strokeDasharray="2 3" opacity="0.5"/>
+            <text x={padL + 4} y={Y(s.target[1]) + 9 + k * 10} fontFamily="JetBrains Mono" fontSize="8.5" fill={s.color} opacity="0.9">ideal {fmt(s.target[0])}–{fmt(s.target[1])}</text>
+          </g>
+        ) : null)}
         {drawn.map((s, k) => {
           const { mx, mn } = extremes(s.points);
           return (
@@ -126,6 +151,17 @@ export function TimeChart({ series = [], fromMs, toMs, yMin = 0, yMax = 100, fmt
               <text x={X(mx.t)} y={Y(mx.hi) - 6} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill={s.color}>{fmt(mx.hi)}</text>
               <circle cx={X(mn.t)} cy={Y(mn.lo)} r="2.5" fill={s.color}/>
               <text x={X(mn.t)} y={Y(mn.lo) + 13} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill={s.color}>{fmt(mn.lo)}</text>
+            </g>
+          );
+        })}
+        {/* Window average per shelf (Austin, 2026-11-11): a straight line
+            through the chart, labelled at the right edge. */}
+        {averages && drawn.map((s, k) => {
+          const m = mean(s.points);
+          return (
+            <g key={'avg' + k}>
+              <line x1={padL} y1={Y(m)} x2={w - padR} y2={Y(m)} stroke={s.color} strokeWidth="1" strokeDasharray="6 4" opacity="0.8"/>
+              <text x={w - padR + 3} y={Y(m) + 3 + k * 10} textAnchor="start" fontFamily="JetBrains Mono" fontSize="8.5" fill={s.color}>avg {fmt(m)}</text>
             </g>
           );
         })}
@@ -142,6 +178,9 @@ export function TimeChart({ series = [], fromMs, toMs, yMin = 0, yMax = 100, fmt
       {rows.length > 0 && (
         <div className="tc-tip" style={{ left: flip ? undefined : hx + 12, right: flip ? (w - hx + 12) : undefined, top: padT }}>
           <div className="tc-tip-t">{fmtStamp(rows[0].p.t)}</div>
+          {hoverRun && (
+            <div className="tc-tip-run">Watered {hoverRun.mins} min · {fmtStamp(hoverRun.t0).split(' · ')[1]}{hoverRun.source ? ` · ${hoverRun.source}` : ''}</div>
+          )}
           {rows.map((r, k) => (
             <div key={k} className="tc-tip-r">
               <i style={{ background: r.color }}/>
