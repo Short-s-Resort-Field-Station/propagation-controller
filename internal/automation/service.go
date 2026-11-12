@@ -352,6 +352,14 @@ func (s *Service) evaluateMoistureRule(rule storage.MoistureRule, now time.Time,
 		return
 	}
 
+	// A probe pulled out of its pot reads ~0 % — that is air, not a dry
+	// shelf, and must never start a soak (Austin, 2026-11-11).
+	if latest.Quality == storage.QualityOutOfMedia {
+		s.blockOnce(rule.ZoneKey, "probe_out_of_media",
+			fmt.Sprintf("zone %s moisture automation paused: probe %s is out of its pot", rule.ZoneKey, rule.SensorKey))
+		return
+	}
+
 	// Hysteresis: after a trigger, wait for recovery above recovered_above
 	// before the zone can trigger again.
 	s.mu.Lock()

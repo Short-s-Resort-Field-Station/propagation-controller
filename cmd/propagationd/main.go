@@ -166,6 +166,24 @@ func main() {
 	aggregateRepo := storage.NewAggregateRepo(db)
 	retentionSvc := retention.NewService(aggregateRepo, readingRepo, settingsRepo, eventLog, log)
 	retentionSvc.Start(ctx)
+	// Set aside readings stored while a probe was out of its pot, then
+	// rebuild the hourly aggregates without them (idempotent; 2026-11-11).
+	go func() {
+		n, err := readingRepo.FlagOutOfMediaHistory(2 * time.Minute)
+		if err != nil {
+			log.Error().Err(err).Msg("out-of-media history flagging failed")
+			return
+		}
+		if n > 0 {
+			if _, err := aggregateRepo.AggregateRange(time.Time{}, time.Now().UTC().Add(time.Hour)); err != nil {
+				log.Error().Err(err).Msg("re-aggregation after out-of-media flagging failed")
+				return
+			}
+			eventLog.Info("out_of_media_history_flagged",
+				fmt.Sprintf("%d stored readings taken with a probe out of its pot were set aside; hourly averages rebuilt", n),
+				"startup", map[string]any{"rows": n})
+		}
+	}()
 
 	authSvc := auth.NewService(storage.NewUserRepo(db), storage.NewSessionRepo(db), eventLog)
 

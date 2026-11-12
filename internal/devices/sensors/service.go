@@ -43,6 +43,58 @@ type poller struct {
 	mu       sync.Mutex
 	failures int
 	offline  bool
+
+	// Probe-in-air tracking (see flagOutOfMedia).
+	inAir       bool
+	settleUntil time.Time
+}
+
+// reseatSettle is how long after a probe goes back into its pot its readings
+// are still set aside — the media needs a moment to close around the tines.
+const reseatSettle = 2 * time.Minute
+
+// flagOutOfMedia marks a soil probe's readings as taken in air when its
+// moisture channel reads under storage.OutOfMediaBelow (Austin, 2026-11-11:
+// pulling a probe to move it must not drag the averages down or trigger a
+// soak). The rows are still stored, with quality "out_of_media"; charts,
+// aggregates and the moisture automation skip them.
+func (s *Service) flagOutOfMedia(deviceKey string, p *poller, readings []Reading) {
+	moisture, found := 0.0, false
+	for _, rd := range readings {
+		if rd.Name == "moisture" {
+			moisture, found = rd.Value, true
+		}
+	}
+	if !found {
+		return
+	}
+	now := time.Now()
+	p.mu.Lock()
+	air := moisture < storage.OutOfMediaBelow
+	wasAir := p.inAir
+	if air {
+		p.inAir = true
+	} else if wasAir {
+		p.inAir = false
+		p.settleUntil = now.Add(reseatSettle)
+	}
+	flag := air || now.Before(p.settleUntil)
+	p.mu.Unlock()
+	if flag {
+		for i := range readings {
+			readings[i].Quality = storage.QualityOutOfMedia
+		}
+	}
+	switch {
+	case air && !wasAir:
+		s.events.Warn("probe_out_of_media",
+			fmt.Sprintf("probe %s reads air — readings set aside until it is back in the pot", deviceKey),
+			"system", map[string]any{"device_key": deviceKey})
+	case !air && wasAir:
+		s.events.Info("probe_reseated",
+			fmt.Sprintf("probe %s is back in media — readings count again in %s", deviceKey, reseatSettle),
+			"system", map[string]any{"device_key": deviceKey})
+	}
 }
 
 func NewService(bus modbus.Bus, readings *storage.ReadingRepo, devices *storage.DeviceRepo,
@@ -253,6 +305,7 @@ func (s *Service) pollOnce(ctx context.Context, deviceKey string, p *poller) {
 	p.offline = false
 	p.mu.Unlock()
 
+	s.flagOutOfMedia(deviceKey, p, readings)
 	inserts := make([]storage.ReadingInsert, len(readings))
 	for i, rd := range readings {
 		inserts[i] = storage.ReadingInsert{
@@ -288,6 +341,7 @@ func (s *Service) PollNow(ctx context.Context, deviceKey string) ([]Reading, err
 	if err != nil {
 		return nil, err
 	}
+	s.flagOutOfMedia(deviceKey, p, readings)
 	inserts := make([]storage.ReadingInsert, len(readings))
 	for i, rd := range readings {
 		inserts[i] = storage.ReadingInsert{

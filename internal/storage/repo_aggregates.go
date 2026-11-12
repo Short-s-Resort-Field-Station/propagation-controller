@@ -39,7 +39,7 @@ func (r *AggregateRepo) AggregateRange(from, to time.Time) (int64, error) {
 		SELECT sensor_key, substr(read_at, 1, 13) || ':00:00',
 		       MIN(value), MAX(value), AVG(value), COUNT(*), unit
 		FROM sensor_readings
-		WHERE read_at >= ? AND read_at < ?
+		WHERE read_at >= ? AND read_at < ? AND quality != 'out_of_media'
 		GROUP BY sensor_key, substr(read_at, 1, 13)
 		ON CONFLICT(sensor_key, hour_start) DO UPDATE SET
 		  min_value = excluded.min_value,
@@ -49,6 +49,23 @@ func (r *AggregateRepo) AggregateRange(from, to time.Time) (int64, error) {
 		  unit = excluded.unit`,
 		from.UTC(), to.UTC())
 	if err != nil {
+		return 0, err
+	}
+	// An hour whose every raw reading was taken with the probe out of its pot
+	// has nothing to summarise: drop any aggregate left from before the rows
+	// were flagged. Hours whose raw rows are already pruned are untouched.
+	if _, err := r.db.Exec(`
+		DELETE FROM sensor_hourly_aggregates
+		WHERE EXISTS (SELECT 1 FROM sensor_readings sr
+		              WHERE sr.sensor_key = sensor_hourly_aggregates.sensor_key
+		                AND sr.read_at >= ? AND sr.read_at < ?
+		                AND substr(sr.read_at, 1, 13) || ':00:00' = sensor_hourly_aggregates.hour_start)
+		  AND NOT EXISTS (SELECT 1 FROM sensor_readings sr
+		              WHERE sr.sensor_key = sensor_hourly_aggregates.sensor_key
+		                AND sr.read_at >= ? AND sr.read_at < ?
+		                AND sr.quality != 'out_of_media'
+		                AND substr(sr.read_at, 1, 13) || ':00:00' = sensor_hourly_aggregates.hour_start)`,
+		from.UTC(), to.UTC(), from.UTC(), to.UTC()); err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
