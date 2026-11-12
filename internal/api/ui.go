@@ -39,6 +39,13 @@ func (s *Server) uiRoutes(r chi.Router) {
 		r.Get("/assets/*", files.ServeHTTP)
 		r.Get("/fonts/*", files.ServeHTTP)
 		r.Get("/seal.png", files.ServeHTTP)
+		// Installable dashboard (PWA, 2026-11-11): manifest, icons, worker.
+		for _, f := range []string{"/manifest.json", "/sw.js", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"} {
+			r.Get(f, func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Cache-Control", "no-cache")
+				files.ServeHTTP(w, req)
+			})
+		}
 		return
 	}
 

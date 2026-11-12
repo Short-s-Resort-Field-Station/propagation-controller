@@ -916,3 +916,39 @@
   @media (max-width:1100px){.ctrl-grid3{grid-template-columns:1fr}}
 
   .rng:disabled::-webkit-slider-thumb{background:var(--lcd-faint)}
+
+  /* ---------- phone layout (2026-11-11): installable PWA, one-thumb use ---------- */
+  @media (max-width:760px){
+    html,body{overflow-x:hidden}
+    .db-top{flex-wrap:wrap;position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top)}
+    .db-brand{flex:1 1 auto;padding:10px 14px;border-right:0;gap:10px}
+    .db-brand img{width:32px;height:32px}
+    .db-statuschip{padding:0 14px;border-left:1px solid var(--ink)}
+    .db-tabs{order:5;flex:1 0 100%;display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--ink)}
+    .db-tab{justify-content:center;padding:0 8px;min-height:44px;white-space:nowrap;border-right:1px solid var(--rule-soft);border-bottom:1px solid var(--rule-soft)}
+    .db-alertbtn,.db-user{order:6;flex:1 1 auto;justify-content:center;min-height:44px;padding:0 10px;border-top:1px solid var(--ink);white-space:nowrap}
+    .db-alertbtn{border-left:0}
+    .db-user .who .role{display:none}
+    .db-body{padding:18px 14px calc(28px + env(safe-area-inset-bottom))}
+    .db-h{flex-direction:column;align-items:flex-start;gap:10px;margin-bottom:14px}
+    .db-h .ttl{font-size:21px}
+    .db-2col,.shelf-grid,.ctrl-grid,.ctrl-grid3,.fx-2,.asg-grid3{grid-template-columns:1fr !important;gap:14px}
+    .stat-grid{grid-template-columns:repeat(2,1fr)}
+    .env-controls,.seg{width:100%}
+    .seg{display:flex}
+    .seg button{flex:1;padding:12px 4px;font-size:9.5px;letter-spacing:0.08em}
+    .chart-card .ch-h{flex-direction:column;align-items:flex-start;gap:6px;padding:10px 12px}
+    .chart-card .ch-leg{flex-wrap:wrap;gap:4px 12px}
+    .chart-card .cb{padding:10px 4px 6px}
+    .env-shelf-h{font-size:17px}
+    .ctrl-row{flex-wrap:wrap;gap:10px}
+    .ctrl-btns{justify-content:flex-start;width:100%}
+    .ctrl-btns .fx-btn{flex:1;min-height:46px;font-size:11px}
+    .ctrl-time,.ctrl-num{font-size:16px;min-height:44px}
+    .fx-btn{min-height:46px}
+    .fx-back{padding:0 !important;align-items:stretch !important}
+    .fx-modal{max-width:none !important;min-height:100%;border-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .fx-body{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+    input,select,textarea{font-size:16px !important}
+    .tc-tip{font-size:10px;min-width:140px}
+  }

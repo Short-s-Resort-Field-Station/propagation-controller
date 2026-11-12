@@ -97,7 +97,8 @@ export function TimeChart({ series = [], runs = [], fromMs, toMs, yMin = 0, yMax
 
   const onMove = (e) => {
     const r = wrap.current.getBoundingClientRect();
-    const x = e.clientX - r.left;
+    const pt = e.touches && e.touches[0] ? e.touches[0] : e;
+    const x = pt.clientX - r.left;
     if (x < padL || x > w - padR) { setHover(null); return; }
     setHover(fromMs + span * ((x - padL) / iw));
   };
@@ -111,7 +112,7 @@ export function TimeChart({ series = [], runs = [], fromMs, toMs, yMin = 0, yMax
   const fmt = (v) => fmtY(Math.round(v * 10) / 10);
 
   return (
-    <div ref={wrap} className="tc-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+    <div ref={wrap} className="tc-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)} onTouchStart={onMove} onTouchMove={onMove}>
       <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
         {gridY.map((g, i) => (
           <g key={i}>
