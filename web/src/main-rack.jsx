@@ -6,6 +6,8 @@ import ReactDOM from 'react-dom/client';
 import './design/pgui.css';
 import './live/overrides.css';
 import { RackDisplay2 } from './design/rack2.jsx';
+import { RackDisplay3 } from './design/rack3.jsx';
+import './design/rack3.css';
 import { useUnitState } from './live/useUnitState.js';
 import { fmtDay } from './live/adapter.js';
 
@@ -41,7 +43,12 @@ function App() {
   // Deep-links for kiosk shortcuts and testing:
   //   /ui/touch#shelf-1       — open a shelf detail
   //   /ui/touch#theme-light   — force a theme (also persists)
+  //   /ui/touch#face-plates   — the round-2 three-plate face (also persists)
+  //   /ui/touch#face-list     — the round-3 list face (default since 2026-11-13)
   const hash = typeof location !== 'undefined' ? location.hash : '';
+  const faceMatch = hash.match(/face-(plates|list)/);
+  const face = faceMatch ? faceMatch[1] : (localStorage.getItem('rackFace') || 'list');
+  React.useEffect(() => { if (faceMatch) localStorage.setItem('rackFace', faceMatch[1]); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const shelfMatch = hash.match(/shelf-(\d+)/);
   const initialOpen = shelfMatch ? String(shelfMatch[1]).padStart(2, '0') : null;
   const themeMatch = hash.match(/theme-(light|dark)/);
@@ -73,7 +80,7 @@ function App() {
         width: CANVAS_W, height: CANVAS_H, flex: 'none',
         transform: `scale(${scale})`, transformOrigin: 'center center',
       }}>
-        <RackDisplay2
+        {face === 'plates' ? <RackDisplay2
           shelves={state.shelves}
           reservoir={state.reservoir}
           reservoirOnline={state.reservoirOnline}
@@ -87,6 +94,7 @@ function App() {
           day={fmtDay()}
           onWater={actions.water}
           onDrain={actions.drain}
+          onPurge={actions.purge}
           onStop={actions.stop}
           onShutdown={actions.shutdown}
           onLight={actions.lights}
@@ -100,7 +108,34 @@ function App() {
           maintenance={state.maintenance}
           onSetMaintenance={actions.setMaintenance}
           onSetEnabled={actions.setShelfEnabled}
-        />
+        /> : <RackDisplay3
+          shelves={state.shelves}
+          reservoir={state.reservoir}
+          reservoirOnline={state.reservoirOnline}
+          rackStatus={state.rackStatus}
+          lockouts={state.lockouts}
+          lastSync={state.lastSync}
+          toast={state.toast}
+          onDismissToast={actions.dismissToast}
+          clock={state.clock}
+          day={fmtDay()}
+          onWater={actions.water}
+          onDrain={actions.drain}
+          onPurge={actions.purge}
+          onStop={actions.stop}
+          onShutdown={actions.shutdown}
+          onLight={actions.lights}
+          onFan={actions.fans}
+          theme={theme}
+          onThemeToggle={toggleTheme}
+          initialOpen={initialOpen}
+          connection={state.connection}
+          maintenance={state.maintenance}
+          onSetMaintenance={actions.setMaintenance}
+          onSetEnabled={actions.setShelfEnabled}
+          pumpOn={state.pumpOn}
+          fanOn={state.fanOn}
+        />}
       </div>
     </div>
   );

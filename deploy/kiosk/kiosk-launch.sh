@@ -11,3 +11,5 @@ exec chromium \
   --overscroll-history-navigation=0 \
   --check-for-update-interval=31536000 \
   --app=http://localhost/propagate/ui/touch
+  # Touch face (2026-11-13): the list face is the default; append '#face-plates'
+  # above to boot the round-2 three-plate face instead (persists in localStorage).
