@@ -184,13 +184,18 @@ func (e *Engine) SeedDefaults() error {
 	// (Austin, 2026-07-06).
 	cfg, _ := json.Marshal(ZoneConfig{DefaultRunSeconds: 60, DrainSeconds: 300,
 		PurgeDelaySeconds: 3600, PurgeSeconds: 60})
-	soil1 := "soil_zone_1_moisture"
+	// Every shelf has its own ZTS-3000 probe (soil_zone_N, seeded by the
+	// sensor service), so every zone links to its own moisture key. The
+	// original seed linked shelf 1 only, from before probes 2 and 3 existed;
+	// the live DB was patched by hand on 2026-11-09 and fresh installs (and the
+	// simulator) were left with two unmetered shelves (2026-11-13).
+	soil1, soil2, soil3 := "soil_zone_1_moisture", "soil_zone_2_moisture", "soil_zone_3_moisture"
 	seeds := []storage.Zone{
 		{ZoneKey: "zone_1", Name: "Shelf 1", ValveRelayChannel: 1, SoilSensorKey: &soil1,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
-		{ZoneKey: "zone_2", Name: "Shelf 2", ValveRelayChannel: 2,
+		{ZoneKey: "zone_2", Name: "Shelf 2", ValveRelayChannel: 2, SoilSensorKey: &soil2,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
-		{ZoneKey: "zone_3", Name: "Shelf 3", ValveRelayChannel: 3,
+		{ZoneKey: "zone_3", Name: "Shelf 3", ValveRelayChannel: 3, SoilSensorKey: &soil3,
 			Enabled: true, MaxFloodSeconds: 1800, MaxPumpSeconds: 1800, ConfigJSON: string(cfg)},
 	}
 	for _, z := range seeds {

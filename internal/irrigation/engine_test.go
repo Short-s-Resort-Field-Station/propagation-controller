@@ -723,3 +723,20 @@ func TestRestartDrainsInterruptedShelf(t *testing.T) {
 	}
 	t.Fatalf("recovery drain never completed (valve opened: %v)", sawValve)
 }
+
+// Every seeded shelf links to its own probe (2026-11-13): a shelf without a
+// soil_sensor_key shows as unmetered on every face, which is how the
+// simulator ended up with two dial-less gauges.
+func TestSeedDefaultsLinksEveryShelfToItsOwnProbe(t *testing.T) {
+	f := newFixture(t)
+	for _, n := range []string{"1", "2", "3"} {
+		z, err := f.zones.GetByKey("zone_" + n)
+		if err != nil || z == nil {
+			t.Fatalf("zone_%s missing after seed: %v", n, err)
+		}
+		want := "soil_zone_" + n + "_moisture"
+		if z.SoilSensorKey == nil || *z.SoilSensorKey != want {
+			t.Errorf("zone_%s soil_sensor_key = %v, want %q", n, z.SoilSensorKey, want)
+		}
+	}
+}
