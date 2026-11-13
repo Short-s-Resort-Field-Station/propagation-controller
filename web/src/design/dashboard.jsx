@@ -3,6 +3,7 @@ import { PG, ForestMark, EventBars } from './data.jsx';
 import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner } from './flows.jsx';
 import { ControlsTab } from './controls.jsx';
 import { TimeChart } from './timechart.jsx';
+import { DialG } from './rack3.jsx';
 
 // pgui-dashboard.jsx — the web dashboard (paper). Tabs:
 // Dashboard · Shelf Management · Environmental · Controls
@@ -58,11 +59,8 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, loc
             <div className="log">
               {log.map((e,i)=>(
                 <div className="log-row" key={i}>
-                  <div style={{display:'flex',gap:10}}>
-                    <span className="sev" style={{background:e.sev}}></span>
-                    <span className="ts">{e.ts}</span>
-                  </div>
-                  <div className="ev">{e.ev}<em>{e.em}</em></div>
+                  <span className="ts">{e.ts}</span>
+                  <div className="ev"><span className="sev" style={{background:e.sev}}></span><div>{e.ev}<em>{e.em}</em></div></div>
                 </div>
               ))}
             </div>
@@ -71,24 +69,26 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, loc
         <div className="panel" style={{alignSelf:'start'}}>
           <div className="ph"><div className="pt">Reservoir</div><div className="pm">{PG.TANK_L} L Tank · {Math.round(PG.TANK_L/3.785)} gal</div></div>
           <div className="pb">
-            <div style={{display:'flex',alignItems:'flex-end',gap:14}}>
-              <div style={{flex:'none',width:64,height:130,border:'1px solid var(--ink)',borderRadius:3,background:'var(--bone)',position:'relative',overflow:'hidden'}}>
-                <div style={{position:'absolute',left:0,right:0,bottom:0,height:(reservoirOnline?reservoir:0)+'%',background:'linear-gradient(180deg,var(--river),var(--river-deep))'}}></div>
-                <div style={{position:'absolute',inset:0,background:'repeating-linear-gradient(0deg,transparent 0 calc(20% - 1px),#1B181333 calc(20% - 1px) 20%)'}}></div>
+            <div className="db-glass">
+              <div className="tube">
+                <i style={{height:(reservoirOnline?reservoir:0)+'%'}}></i>
+                <div className="tk"></div>
+                <div className="floor"></div>
               </div>
-              <div>
-                <div style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:42,lineHeight:0.9}}>{reservoirOnline?reservoir:'—'}<span style={{fontSize:20,color:'var(--char)'}}>%</span></div>
-                <div className="mono" style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'#1B181399',marginTop:6,lineHeight:1.7}}>
+              <div className="rd">
+                <div className="pc">{reservoirOnline?reservoir:'—'}<span>%</span></div>
+                <div className="est">
                   {reservoirOnline
                     ? <React.Fragment>est. {PG.tankLiters(reservoir)} L on hand<br/>est. {PG.tankDays(reservoir)} days remaining<br/>Estimates · uncalibrated flow</React.Fragment>
                     : <React.Fragment>level sensor offline<br/>no fresh reading<br/>check the reservoir probe</React.Fragment>}
                 </div>
               </div>
             </div>
-            <div style={{marginTop:16,paddingTop:14,borderTop:'1px solid var(--rule-soft)'}} className="mono">
-              <div style={{display:'flex',alignItems:'center',gap:9,fontSize:11,letterSpacing:'0.14em',textTransform:'uppercase'}}>
-                <span style={{width:9,height:9,borderRadius:'50%',background:!reservoirOnline?'var(--oxblood)':reservoir>20?'var(--sage)':'var(--oxblood)'}}></span> {!reservoirOnline?'Sensor offline':reservoir>20?'Level nominal':'Refill required'}
-              </div>
+            <div className="db-glass-st">
+              <span className="db-chip" style={{color:!reservoirOnline?'var(--oxblood)':reservoir>20?'var(--sage)':'var(--oxblood)'}}>
+                <i className="dia"></i>{!reservoirOnline?'Sensor offline':reservoir>20?'Level nominal':'Refill required'}
+              </span>
+              <span className="k">lockout floor · 20%</span>
             </div>
           </div>
         </div>
@@ -114,18 +114,15 @@ function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
       </div>
       {s.active ? (
         <React.Fragment>
-          <div className="sc-mid">
-            <div><div className="mk">Moisture</div><div className="mv">{s.probe ? s.moisture : '—'}{s.probe && <span>%VWC</span>}</div></div>
-            <div><div className="mk">Root Zone Temp</div><div className="mv">{s.temp>0 ? s.temp : '—'}{s.temp>0 && <span>°F</span>}</div></div>
-          </div>
-          <div className="sc-bar">
-            <div className="mk" style={{marginBottom:7}}>Moisture vs. target band</div>
-            <div className="barwrap">
-              <i style={{width:s.moisture+'%',background:inBand?'var(--sage)':'var(--ochre)'}}></i>
-              {s.hasRule!==false && <span className="tgt" style={{left:s.lo+'%'}}></span>}
-              {s.hasRule!==false && <span className="tgt" style={{left:s.hi+'%'}}></span>}
+          {/* 2026-11-13 (console re-skin): the touch screen's dial G with the
+              three readings beside it, in place of the bar graph. */}
+          <div className="sc-dial">
+            <DialG value={s.moisture} lo={s.lo} hi={s.hi} active={!!s.probe} hasBand={s.hasRule!==false} size={104}/>
+            <div className="reads">
+              <div><div className="k">Moisture</div><div className="v">{s.probe ? s.moisture : '—'}<small>%VWC</small></div><div className="b">{s.hasRule===false ? 'target · not set' : `target ${s.lo}–${s.hi}`}</div></div>
+              <div><div className="k">Root Zone Temp</div><div className="v">{s.temp>0 ? s.temp : '—'}<small>°F</small></div><div className="b">{s.tempBand ? `band ${s.tempBand[0]}–${s.tempBand[1]}` : 'band · not set'}</div></div>
+              <div><div className="k">Substrate EC</div><div className="v">{s.ec!=null ? s.ec : '—'}<small style={{textTransform:'none'}}>µS/cm</small></div><div className="b">{s.ecBand ? `band ${s.ecBand[0]}–${s.ecBand[1]}` : 'band · not set'}</div></div>
             </div>
-            <div className="barlabels"><span>0%</span><span>{s.hasRule===false ? 'Target · not set' : `Target ${s.lo}–${s.hi}%`}</span><span>100%</span></div>
           </div>
           <div className="sc-foot">
             <div><div className="k">Lighting</div><div className="v">{s.light?'On · '+s.on:'Off'}</div></div>
@@ -180,7 +177,7 @@ function ShelvesTab({ shelves, onAssign, onEdit, onSetEnabled, onUnassign, role 
     <div>
       <div className="db-h">
         <div className="ttl">Shelf Management</div>
-        <div className="sub">One card per growing shelf · physical bays 01–04</div>
+        <div className="sub">One card per growing shelf · bays 01–03</div>
       </div>
       <div className="shelf-grid">
         {shelves.map(s=> <ShelfCard key={s.n} s={s} onAssign={onAssign} onEdit={onEdit}
@@ -294,18 +291,18 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
           </div>
           <div className="cb">
             <div style={{display:'grid',gridTemplateColumns:'1fr 1.4fr 1.4fr',gap:'8px 18px',fontFamily:'"JetBrains Mono",monospace',fontSize:11,alignItems:'baseline'}}>
-              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'#1B181399'}}>Shelf</div>
-              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'#1B181399'}}>Substrate EC</div>
-              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'#1B181399'}}>Root Zone Temp</div>
+              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'var(--char)'}}>Shelf</div>
+              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'var(--char)'}}>Substrate EC</div>
+              <div style={{fontSize:9,letterSpacing:'0.14em',textTransform:'uppercase',color:'var(--char)'}}>Root Zone Temp</div>
               {live.adherence.map(a=>(
                 <React.Fragment key={a.n}>
                   <div>Shelf {a.n}</div>
                   <div>{a.ec
-                    ? <span><b style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:15}}>{a.ec.pct}%</b> in {a.ecBand[0]}–{a.ecBand[1]} µS/cm <span style={{color:'#1B181399'}}>· {a.ec.n}h</span></span>
-                    : <span style={{color:'#1B181399'}}>{a.ecBand?'awaiting data':'no band set'}</span>}</div>
+                    ? <span><b style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:15}}>{a.ec.pct}%</b> in {a.ecBand[0]}–{a.ecBand[1]} µS/cm <span style={{color:'var(--char)'}}>· {a.ec.n}h</span></span>
+                    : <span style={{color:'var(--char)'}}>{a.ecBand?'awaiting data':'no band set'}</span>}</div>
                   <div>{a.temp
-                    ? <span><b style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:15}}>{a.temp.pct}%</b> in {a.tempBand[0]}–{a.tempBand[1]}°F <span style={{color:'#1B181399'}}>· {a.temp.n}h</span></span>
-                    : <span style={{color:'#1B181399'}}>{a.tempBand?'awaiting data':'no band set'}</span>}</div>
+                    ? <span><b style={{fontFamily:'Zilla Slab',fontWeight:900,fontSize:15}}>{a.temp.pct}%</b> in {a.tempBand[0]}–{a.tempBand[1]}°F <span style={{color:'var(--char)'}}>· {a.temp.n}h</span></span>
+                    : <span style={{color:'var(--char)'}}>{a.tempBand?'awaiting data':'no band set'}</span>}</div>
                 </React.Fragment>
               ))}
             </div>
@@ -364,7 +361,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
 
   // fallbacks so the component also works standalone (e.g. the handoff figure)
   const [locAssign, setLocAssign] = React.useState({});
-  const [locSession, setLocSession] = React.useState({ name:'A. Short', role:'Steward' });
+  const [locSession, setLocSession] = React.useState({ name:'Steward', role:'Steward' });
   const ses = session !== undefined ? session : locSession;
   const assignFn = onAssign || ((n,f)=>setLocAssign(a=>({...a,[n]:f})));
   const signInFn = onSignIn || setLocSession;
@@ -384,15 +381,15 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
       {/* change 2: maintenance banner sits under any offline banner. */}
       {maintenance && <MaintenanceBanner canManage={!!canToggleMaint} onExit={()=>setShowMaint(true)}/>}
       <div className="db-top">
+       <div className="db-mast">
         <div className="db-brand">
-          <ForestMark/>
-          <div className="t">Propagation Unit 01<small>Control Center</small></div>
+          <ForestMark size={46}/>
         </div>
-        <div className="db-tabs">
-          {DB_TABS.map(t=>(
-            <button key={t} className={'db-tab'+(t===tab?' on':'')} onClick={()=>setTab(t)}>{t}</button>
-          ))}
+        <div className="db-mh">
+          <div className="eye"><span className="dia"></span>Dept. of Forestry · Field Station<span className="dia"></span></div>
+          <div className="ttl">Propagation Unit · No. 01</div>
         </div>
+        <div className="db-chips">
         <div className={'db-alertbtn'+(alerts.length?'':' calm')} onClick={()=>setShowAlerts(true)}>
           Alerts <span className="cnt">{alerts.length}</span>
         </div>
@@ -418,9 +415,18 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
             title={estop?'Reset the safety supervisor':'Emergency stop — all outputs off'}>
             {estop?'Reset safety':'E-STOP'}
           </div>}
+        </div>
+       </div>
+       <div className="db-tabbar">
+        <div className="db-tabs">
+          {DB_TABS.map(t=>(
+            <button key={t} className={'db-tab'+(t===tab?' on':'')} onClick={()=>setTab(t)}>{t}</button>
+          ))}
+        </div>
         <div className="db-statuschip">
           <span className="d" style={{background:rs.col}}></span>{rackStatus}
         </div>
+       </div>
       </div>
       {/* audit 3.1: the last rejected command, under the top bar. */}
       {toast && <div className="db-toast" onClick={onDismissToast} role="status"><span className="d"></span>{toast.text}</div>}

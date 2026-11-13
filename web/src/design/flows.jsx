@@ -428,7 +428,7 @@ function AlertsModal({ alerts, esc, setEsc, onAck, onAckAll, onClose }){
           : <div className="fx-latin" style={{marginBottom:'20px'}}>No active alerts — all clear.</div>}
         <div className="fx-k">Escalation policy</div>
         <div className="esc-box">
-          <EscRow label="Email the on-call steward" sub="A. Short · steward@shortsresort" on={esc.email} tog={()=>tog('email')}/>
+          <EscRow label="Email the on-call steward" sub="The on-call steward" on={esc.email} tog={()=>tog('email')}/>
           <EscRow label="SMS text alert" sub="For Action-Required only" on={esc.sms} tog={()=>tog('sms')}/>
         </div>
         <div className="fx-2" style={{marginTop:'16px'}}>
@@ -459,7 +459,7 @@ function HistoryModal({ onClose }){
         <div className="hs-list">
           {rows.map((x,k)=>(
             <div className="hs-row" key={k}>
-              <span className="ts" style={{color:'#1B181399'}}>{x.ts}</span>
+              <span className="ts" style={{color:'var(--char)'}}>{x.ts}</span>
               <span className="ev">{x.ev}<em>{x.em}</em></span>
               <span className="cat"><span className="sev" style={{background:x.sev}}></span>{x.cat}</span>
             </div>

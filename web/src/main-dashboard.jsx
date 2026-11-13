@@ -2,6 +2,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './design/pgui.css';
+import './design/rack3.css';
+import './design/console.css';
 import { PG } from './design/data.jsx';
 import { Dashboard } from './design/dashboard.jsx';
 import { useUnitState } from './live/useUnitState.js';
@@ -133,8 +135,8 @@ function App() {
 
   if (!state.ready || session === undefined) {
     return (
-      <div style={{ fontFamily: 'JetBrains Mono, monospace', padding: 40, color: '#1B1813',
-        background: '#ECE3CE', minHeight: '100vh', letterSpacing: '0.1em' }}>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', padding: 40, color: '#D3CCB3',
+        background: '#2E4A46', minHeight: '100vh', letterSpacing: '0.1em' }}>
         CONNECTING TO PROPAGATION UNIT 01…
       </div>
     );
@@ -192,6 +194,7 @@ function App() {
   );
 }
 
-document.body.style.background = '#ECE3CE';
+document.body.classList.add('console');
+document.body.style.background = '#2E4A46';
 document.body.style.margin = '0';
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);

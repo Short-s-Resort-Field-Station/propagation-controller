@@ -28,6 +28,7 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	anonymous := currentUser(r) == nil
 
 	for {
 		select {
@@ -37,7 +38,11 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			payload, err := json.Marshal(ev.Payload)
+			body := ev.Payload
+			if anonymous && ev.Type == "system_event" {
+				body = redactSystemEvent(body)
+			}
+			payload, err := json.Marshal(body)
 			if err != nil {
 				continue
 			}
@@ -48,4 +53,28 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// redactSystemEvent is the stream's twin of redactAccountEvents: the public
+// feed never names an operator.
+func redactSystemEvent(payload any) any {
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return payload
+	}
+	typ, _ := m["event_type"].(string)
+	msg, ok := publicAccountEvents[typ]
+	if !ok {
+		return payload
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	out["message"] = msg
+	out["details"] = nil
+	if a, _ := m["actor"].(string); a != "" {
+		out["actor"] = "operator"
+	}
+	return out
 }

@@ -116,15 +116,15 @@ export function TimeChart({ series = [], runs = [], fromMs, toMs, yMin = 0, yMax
       <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
         {gridY.map((g, i) => (
           <g key={i}>
-            <line x1={padL} y1={Y(g)} x2={w - padR} y2={Y(g)} stroke="#1B181322" strokeWidth="1" strokeDasharray={i === 0 ? '0' : '2 4'}/>
-            <text x={padL - 8} y={Y(g) + 3} textAnchor="end" fontFamily="JetBrains Mono" fontSize="9" fill="#1B181399">{fmtY(Math.round(g * 10) / 10)}</text>
+            <line x1={padL} y1={Y(g)} x2={w - padR} y2={Y(g)} stroke="var(--rule-soft)" strokeWidth="1" strokeDasharray={i === 0 ? '0' : '2 4'}/>
+            <text x={padL - 8} y={Y(g) + 3} textAnchor="end" fontFamily="JetBrains Mono" fontSize="9" fill="var(--char)">{fmtY(Math.round(g * 10) / 10)}</text>
           </g>
         ))}
         {ticks.map((tk) => (
           <g key={tk.t}>
-            <line x1={X(tk.t)} y1={padT} x2={X(tk.t)} y2={padT + ih} stroke={tk.major ? '#1B181340' : '#1B181318'} strokeWidth="1" strokeDasharray={tk.major ? '0' : '2 4'}/>
-            <text x={X(tk.t)} y={padT + ih + 14} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill={tk.major ? '#1B1813' : '#1B181399'}>{tk.label}</text>
-            {tk.sub && <text x={X(tk.t)} y={padT + ih + 26} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="8.5" fill="#1B181399">{tk.sub}</text>}
+            <line x1={X(tk.t)} y1={padT} x2={X(tk.t)} y2={padT + ih} stroke={tk.major ? 'var(--rule)' : 'var(--rule-soft)'} strokeWidth="1" strokeDasharray={tk.major ? '0' : '2 4'}/>
+            <text x={X(tk.t)} y={padT + ih + 14} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill={tk.major ? 'var(--ink)' : 'var(--char)'}>{tk.label}</text>
+            {tk.sub && <text x={X(tk.t)} y={padT + ih + 26} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="8.5" fill="var(--char)">{tk.sub}</text>}
           </g>
         ))}
         {runs.filter((r) => r.t0 >= fromMs && r.t0 <= toMs).map((r, k) => (
@@ -168,7 +168,7 @@ export function TimeChart({ series = [], runs = [], fromMs, toMs, yMin = 0, yMax
         })}
         {rows.length > 0 && (
           <g>
-            <line x1={hx} y1={padT} x2={hx} y2={padT + ih} stroke="#1B1813" strokeWidth="1" strokeDasharray="3 3"/>
+            <line x1={hx} y1={padT} x2={hx} y2={padT + ih} stroke="var(--ink)" strokeWidth="1" strokeDasharray="3 3"/>
             {rows.map((r, k) => <circle key={k} cx={X(r.p.t)} cy={Y(r.p.v)} r="3.5" fill="var(--paper)" stroke={r.color} strokeWidth="2"/>)}
           </g>
         )}

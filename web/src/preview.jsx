@@ -93,7 +93,7 @@ function App(){
     return (
       <div className="live-db">
         <Dashboard shelves={demoShelves} reservoir={78} reservoirOnline={!estop} rackStatus={estop?'Fault':'Operational'} log={PG.initialLog()}
-          session={{name:'A. Short', role:'Steward'}} alerts={[]} connection="online" lastSync="14:21"
+          session={{name:'Steward', role:'Steward'}} alerts={[]} connection="online" lastSync="14:21"
           estop={estop} onEmergencyStop={()=>{}} onSafetyReset={()=>{}}
           toast={estop?{text:'Water: sign in required to control the unit', at:0}:null}
           getSeries={null} controls={null} profiles={demoProfiles}

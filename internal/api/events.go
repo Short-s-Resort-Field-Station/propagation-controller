@@ -30,7 +30,38 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []storage.Event{}
 	}
+	if currentUser(r) == nil {
+		redactAccountEvents(events)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// Account events name operators. The public page is read-only for anyone
+// not signed in, and "who runs this unit" is not part of what it shows
+// (Austin, 2026-11-13: no names on the public-facing site) — so an
+// anonymous caller gets these events with the operator anonymised. Signed-in
+// operators and the rack console see the full record.
+var publicAccountEvents = map[string]string{
+	"auth_setup_complete": "the steward account was created",
+	"user_created":        "an operator account was created",
+	"user_signed_in":      "an operator signed in",
+	"user_updated":        "an operator account was updated",
+	"user_deleted":        "an operator account was deleted",
+}
+
+func redactAccountEvents(events []storage.Event) {
+	for i := range events {
+		msg, ok := publicAccountEvents[events[i].EventType]
+		if !ok {
+			continue
+		}
+		events[i].Message = msg
+		events[i].DetailsJSON = nil
+		if events[i].Actor != nil {
+			actor := "operator"
+			events[i].Actor = &actor
+		}
+	}
 }
 
 func (s *Server) handleListRelayActions(w http.ResponseWriter, r *http.Request) {

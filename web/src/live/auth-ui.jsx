@@ -5,8 +5,8 @@ import { api } from './api.js';
 
 const inputStyle = {
   width: '100%', boxSizing: 'border-box',
-  border: '1.5px solid var(--ink)', borderRadius: '4px',
-  background: 'var(--bone)', color: 'var(--ink)',
+  border: '1.5px solid var(--rule)', borderRadius: '3px',
+  background: '#00000020', color: 'var(--ink)',
   fontFamily: '"JetBrains Mono", monospace', fontSize: '14px',
   padding: '11px 12px', outline: 'none',
 };
@@ -22,8 +22,13 @@ function Field({ label, type = 'text', value, onChange, autoFocus, placeholder }
 }
 
 const ROLE_NAMES = { admin: 'Steward', operator: 'Grower', viewer: 'Viewer' };
+// The rack console's loopback identity (`implicit`) belongs to the touch
+// screen only. The web dashboard always asks for an explicit sign-in, so a
+// browser on the unit itself — or anything that reaches the daemon without
+// forwarding headers — opens read-only like the public page (Austin,
+// 2026-11-13: public = read-only, nobody sees the operator list unsigned).
 export const toDesignSession = (u) =>
-  u ? { name: u.username, role: ROLE_NAMES[u.role] || 'Viewer', backendRole: u.role } : null;
+  u && !u.implicit ? { name: u.username, role: ROLE_NAMES[u.role] || 'Viewer', backendRole: u.role } : null;
 
 /* ---- Sign in (username + password against the real backend) ---- */
 export function LiveSignInModal({ onSignIn, onClose }) {
@@ -85,7 +90,7 @@ export function SetupModal({ onDone }) {
             Welcome to Propagation Unit 01. Create the steward account — it holds
             full control of the unit and manages all other operators.
           </div>
-          <Field label="Steward name" value={username} onChange={setUsername} autoFocus placeholder="A. Short" />
+          <Field label="Steward name" value={username} onChange={setUsername} autoFocus placeholder="steward" />
           <Field label="Password · 8+ characters" type="password" value={password} onChange={setPassword} />
           <div onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}>
             <Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} />

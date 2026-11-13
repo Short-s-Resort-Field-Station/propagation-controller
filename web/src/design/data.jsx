@@ -15,9 +15,9 @@ PG.STATUS = {
   Queued:       { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'WAITING' }, // 2026-11-13: in the one-shelf queue behind another cycle
   Dry:          { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'ACTION REQUIRED' },
   'Sensor Fault':{col:'var(--i-oxblood)', inkCol:'var(--oxblood)',    sev:'ACTION REQUIRED' },
-  Inactive:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'—' },
+  Inactive:     { col:'var(--lcd-faint)', inkCol:'var(--char)',         sev:'—' },
   Maintenance:  { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'PAUSED' },     // change 2: automation suspended
-  Disabled:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'DISABLED' },   // change 2: assigned but paused
+  Disabled:     { col:'var(--lcd-faint)', inkCol:'var(--char)',         sev:'DISABLED' },   // change 2: assigned but paused
   'Locked Out': { col:'var(--i-oxblood)', inkCol:'var(--oxblood)',    sev:'ACTION REQUIRED' }, // audit 3.11: safety lockout
 };
 
@@ -66,7 +66,7 @@ PG.SPECIES = [
 
 // ---- operators & roles (auth flow) ----
 PG.OPERATORS = [
-  { name:'A. Short',     role:'Steward', pin:'2468' },
+  { name:'Head Steward', role:'Steward', pin:'2468' },
   { name:'M. Reyes',     role:'Grower',  pin:'1357' },
   { name:'J. Alvarez',   role:'Grower',  pin:'0642' },
   { name:'Field Intern', role:'Viewer',  pin:'0000' },
@@ -183,8 +183,8 @@ function LineChart({ datasets, w=820, h=200, pad=38, yMin=40, yMax=85, fmtY=(v)=
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block',overflow:'visible'}}>
       {gridY.map((g,i)=>(
         <g key={i}>
-          <line x1={pad} y1={Y(g)} x2={w-pad} y2={Y(g)} stroke="#1B181322" strokeWidth="1" strokeDasharray={i===0?'0':'2 4'}/>
-          <text x={pad-8} y={Y(g)+3} textAnchor="end" fontFamily="JetBrains Mono" fontSize="9" fill="#1B181399">{fmtY(g)}</text>
+          <line x1={pad} y1={Y(g)} x2={w-pad} y2={Y(g)} stroke="var(--rule-soft)" strokeWidth="1" strokeDasharray={i===0?'0':'2 4'}/>
+          <text x={pad-8} y={Y(g)+3} textAnchor="end" fontFamily="JetBrains Mono" fontSize="9" fill="var(--char)">{fmtY(g)}</text>
         </g>
       ))}
       {datasets.map((ds,k)=>(
@@ -203,7 +203,7 @@ function EventBars({ data, w=820, h=120, pad=28, color='var(--river)' }){
   const max=Math.max(...data,1), bw=innerW/n*0.5;
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block'}}>
-      <line x1={pad} y1={pad*0.4+innerH} x2={w-pad} y2={pad*0.4+innerH} stroke="#1B181333" strokeWidth="1"/>
+      <line x1={pad} y1={pad*0.4+innerH} x2={w-pad} y2={pad*0.4+innerH} stroke="var(--rule)" strokeWidth="1"/>
       {data.map((v,i)=>{ const x=pad+innerW*(i/(n-1))-bw/2; const bh=innerH*(v/max); return (
         <rect key={i} x={x} y={pad*0.4+innerH-bh} width={bw} height={bh} fill={color} opacity={v?0.85:0.15}/>
       );})}
