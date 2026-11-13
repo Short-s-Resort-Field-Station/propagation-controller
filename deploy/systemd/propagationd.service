@@ -6,6 +6,8 @@ After=network.target
 ExecStart=/opt/propagation-controller/propagationd
 Environment=PROPAGATION_DATA_DIR=/var/lib/propagation-controller
 Environment=PROPAGATION_LISTEN=:80
+# Phone push / SMS for reservoir lockouts; see deploy/notify.env.example.
+EnvironmentFile=-/etc/propagation-controller/notify.env
 Restart=always
 RestartSec=3
 User=propagation

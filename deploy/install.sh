@@ -15,6 +15,8 @@ WATCHDOG_SRC="${2:-./propagation-watchdog-linux-amd64}"
 [ -f "$WATCHDOG_SRC" ] && install -m 755 "$WATCHDOG_SRC" /opt/propagation-controller/propagation-watchdog
 chown -R propagation:propagation /var/lib/propagation-controller
 
+# Notification config: seed the template once, never overwrite an edited one.
+[ -f /etc/propagation-controller/notify.env ] || install -m 600 -o root -g root notify.env.example /etc/propagation-controller/notify.env
 install -m 644 systemd/propagationd.service /etc/systemd/system/
 [ -f /opt/propagation-controller/propagation-watchdog ] && install -m 644 systemd/propagation-watchdog.service /etc/systemd/system/
 systemctl daemon-reload

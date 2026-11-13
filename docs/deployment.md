@@ -66,6 +66,41 @@ JSON to stderr.
 
 ```sh
 make linux
-scp bin/propagationd-linux-amd64 deploy/ piconium:
-ssh piconium 'cd deploy && sudo ./install.sh ../propagationd-linux-amd64'
+scp bin/propagationd-linux-amd64 bin/propagation-watchdog-linux-amd64 piconium:
+scp -rp deploy piconium:
+ssh -t piconium 'chmod +x deploy/install.sh && cd deploy && sudo ./install.sh ../propagationd-linux-amd64 ../propagation-watchdog-linux-amd64'
 ```
+
+The installer seeds `/etc/propagation-controller/notify.env` from
+`deploy/notify.env.example` the first time only and never overwrites it.
+
+## Phone notifications (reservoir lockouts)
+
+`propagationd` pushes "Reservoir empty" / "Reservoir sensor offline" and the
+matching all-clear to the transports named in `notify.env`; nothing else is
+sent. Both are optional and independent.
+
+- **ntfy push** (no account): install the ntfy app, then on the Piconium
+
+  ```sh
+  sudo sh -c 'sed -i "s/^PROPAGATION_NTFY_TOPIC=.*/PROPAGATION_NTFY_TOPIC=pu01-$(openssl rand -hex 8)/" /etc/propagation-controller/notify.env'
+  sudo grep NTFY_TOPIC /etc/propagation-controller/notify.env   # subscribe to this topic in the app
+  sudo systemctl restart propagationd
+  ```
+
+  Treat the topic like a password: anyone who knows it can read the pushes.
+- **Twilio SMS**: fill the four `PROPAGATION_TWILIO_*` lines with your own
+  account's SID, auth token, sending number and your mobile (E.164, `+1...`),
+  then restart. US long codes need A2P 10DLC registration before carriers
+  deliver; a trial account texts only its verified numbers.
+
+To test either one without emptying the tank, raise the cutoff above the
+current level and put it back:
+
+```sh
+curl -s localhost/api/v1/settings | jq .settings.safety      # note the current block
+# PUT the same block with "min_reservoir_level": 90, wait 5 s, PUT it back to 20
+```
+
+Startup logs the enabled transports as `"notifications": [...]` in the
+`startup_complete` event (never the credentials).

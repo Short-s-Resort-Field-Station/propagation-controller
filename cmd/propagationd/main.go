@@ -25,6 +25,7 @@ import (
 	"propagation-controller/internal/irrigation"
 	"propagation-controller/internal/lighting"
 	"propagation-controller/internal/logging"
+	"propagation-controller/internal/notify"
 	"propagation-controller/internal/retention"
 	"propagation-controller/internal/safety"
 	"propagation-controller/internal/storage"
@@ -66,6 +67,10 @@ func main() {
 	hub := bus.New()
 	eventLog := logging.NewEventLogger(log, events)
 	eventLog.AttachHub(hub)
+	// Phone push for reservoir lockouts (Austin, 2026-11-13). Configured by
+	// environment only (deploy/notify.env.example); inert when unset.
+	notifyCfg := notify.LoadFromEnv()
+	notifySvc := notify.New(notifyCfg, hub, log)
 
 	var ctrl relay.Controller
 	driverName := "numato_usb"
@@ -87,6 +92,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	notifySvc.Start(ctx)
 
 	mgr := devices.NewManager(ctrl, driverName, actions, deviceRepo, eventLog, cfg.Simulation)
 	mgr.AttachHub(hub)
@@ -242,8 +248,9 @@ func main() {
 	}()
 
 	eventLog.Info("startup_complete", "propagationd started", "system", map[string]any{
-		"version":    version.Version,
-		"simulation": cfg.Simulation,
+		"version":       version.Version,
+		"simulation":    cfg.Simulation,
+		"notifications": notifyCfg.Transports(),
 	})
 
 	<-ctx.Done()
