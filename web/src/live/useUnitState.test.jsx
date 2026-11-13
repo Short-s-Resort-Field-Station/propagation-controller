@@ -60,6 +60,7 @@ describe('useUnitState', () => {
     expect(state.reservoirOnline).toBe(true);
     expect(state.lastSync).toMatch(/^\d\d:\d\d$/);
     expect(state.connection).toBe('online');
+    expect(state.pumpOn).toBe(false);
     expect(state.toast).toBeNull();
     const gets = calls.filter((c) => !c.opts.method || c.opts.method === 'GET');
     expect(gets.length).toBeGreaterThan(0);
@@ -169,5 +170,28 @@ describe('useUnitState', () => {
     await act(async () => { await actions.setAutomation(false); });
     const s = calls.find((c) => c.path === '/settings' && c.opts.method === 'PUT');
     expect(JSON.parse(s.opts.body)).toEqual({ automation: { enabled: false } });
+  });
+});
+
+describe('purge (2026-11-13)', () => {
+  it('posts a hand purge to the drain endpoint with purge:true, attributed to the surface', async () => {
+    installFetch(() => json(202, { status: 'started', purge: true }));
+    const { result } = renderHook(() => useUnitState('manual_touch'));
+    await waitFor(() => expect(result.current[0].ready).toBe(true));
+    let ok;
+    await act(async () => { ok = await result.current[1].purge(result.current[0].shelves[0]); });
+    expect(ok).toBe(true);
+    const call = calls.find((c) => c.path === '/irrigation/zones/zone_3/drain' && c.opts.method === 'POST');
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call.opts.body)).toMatchObject({ purge: true, actor: 'manual_touch' });
+  });
+  it('a refused purge (purge off for the zone) becomes a toast and resolves false', async () => {
+    installFetch((path) => (path.endsWith('/drain') ? json(409, { error: 'purge is off for this zone (purge_seconds is 0)' }) : json(200, {})));
+    const { result } = renderHook(() => useUnitState('manual_touch'));
+    await waitFor(() => expect(result.current[0].ready).toBe(true));
+    let ok;
+    await act(async () => { ok = await result.current[1].purge(result.current[0].shelves[0]); });
+    expect(ok).toBe(false);
+    expect(result.current[0].toast.text).toMatch(/Purge: purge is off/);
   });
 });

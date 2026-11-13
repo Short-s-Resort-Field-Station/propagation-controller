@@ -3,6 +3,8 @@
 
 // Relay channel (spec 1-indexed) carrying the ganged circulation fans — as
 // built: Numato silkscreen 3. Keep in sync with devices.FansChannel.
+// Pump relay (software channel 7, silkscreen 6) — the footer's truth-light reads it.
+export const PUMP_RELAY = 7;
 export const FANS_RELAY = 4;
 
 const CAT_STRIPE = {
@@ -63,6 +65,21 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
   // (pump on) and drain-back (pump off, valve open) phases read distinctly.
   const activeState = engine.active_cycle ? engine.active_cycle.state : null;
   const queuedZones = new Set((engine.queue || []).map((q) => q.zone_key));
+  // Queue detail (Austin, 2026-11-13): a shelf waiting behind another's cycle
+  // shows as Queued with a Cancel on its detail screen — yesterday a request
+  // queued by accident could not be undone from the panel.
+  const queueInfo = {};
+  (engine.queue || []).forEach((q, idx) => {
+    queueInfo[q.zone_key] = {
+      pos: idx + 1 + (engine.active_cycle ? 1 : 0),
+      kind: q.drain_only ? (q.trigger_source === 'purge' ? 'Purge' : 'Drain') : 'Water',
+      behind: idx === 0 ? (engine.active_cycle ? engine.active_cycle.zone_key : null) : (engine.queue[idx - 1].zone_key),
+    };
+  });
+  // Post-drain purges the engine has armed (valve re-open, pump off) — shown
+  // so a hand purge isn't fired on a shelf that is about to purge itself.
+  const purgeDueByZone = {};
+  for (const p of engine.pending_purges || []) purgeDueByZone[p.zone_key] = { at: p.due_at, seconds: p.seconds };
 
   // Per-shelf root-zone temperature (°F) and substrate EC (µS/cm), keyed by
   // sensor key — every shelf has its own probe as of the 2026-11-09 build.
@@ -111,7 +128,7 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
     else if (z.soil_sensor_key && !sensorFresh) status = 'Sensor Fault';
     else if (rule && z.soil_sensor_key && sensorFresh && moisture < lo) status = 'Dry';
     else if (rule && z.soil_sensor_key && sensorFresh && moisture < lo + 3) status = 'Monitoring';
-    else if (queuedZones.has(z.zone_key)) status = 'Monitoring';
+    else if (queuedZones.has(z.zone_key)) status = 'Queued';
 
     // change 2 (maintenance): while maintenance mode is on, calm the per-shelf
     // moisture/probe alarms (pulling probes or moving trays shouldn't raise
@@ -137,6 +154,13 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
       active: z.enabled,
       // Audit 3.2/3.4: this shelf's live cycle phase (null when idle).
       cycle: z.zone_key === activeZone ? cycle : null,
+      // Queue position/kind while this shelf waits its turn (null otherwise).
+      queued: queueInfo[z.zone_key] ? {
+        ...queueInfo[z.zone_key],
+        behind: queueInfo[z.zone_key].behind ? shelfNumber(queueInfo[z.zone_key].behind, -1) : null,
+      } : null,
+      // Armed post-drain purge for this shelf: { at: ISO, seconds } or null.
+      purgeDue: purgeDueByZone[z.zone_key] || null,
       // Audit 3.11: whether a moisture rule exists — without one there is no
       // target band to draw ("Target · not set").
       hasRule: !!rule,

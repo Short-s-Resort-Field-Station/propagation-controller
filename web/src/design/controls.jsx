@@ -157,7 +157,7 @@ function AutomationPanel({ form, live, canEdit, onSave, onSetAutomation, onSetMa
 // Actions only. A shelf's settings (band, soak, drain, gap, cap, species)
 // are edited in one place — Shelf Management's edit modal — never here.
 
-function ShelfActions({ list, canManual, onWater, onDrain, onStop }){
+function ShelfActions({ list, canManual, onWater, onDrain, onPurge, onStop }){
   const [confirm, setConfirm] = React.useState(null); // shelf n
   const rows = list.filter(x=>x.active || x.assigned);
   const target = rows.find(x=>x.n===confirm);
@@ -167,14 +167,20 @@ function ShelfActions({ list, canManual, onWater, onDrain, onStop }){
       <div className="pb" style={{paddingTop:4,paddingBottom:4}}>
         {rows.length===0 && <div className="ctrl-note">No shelf assigned yet.</div>}
         {rows.map(x=>{
-          const now = x.cycle ? `${x.cycle.state} · ${Math.round((x.cycle.duration||0)/60)} min` : (x.probe ? `Probe ${x.moisture}%` : 'No probe reading');
+          // 2026-11-13: a queued shelf says so and can be cancelled (Stop dequeues it).
+          const now = x.cycle ? `${x.cycle.state} · ${Math.round((x.cycle.duration||0)/60)} min`
+            : x.queued ? `${x.queued.kind} queued${x.queued.behind ? ` · after Shelf ${x.queued.behind}` : ''}`
+            : (x.probe ? `Probe ${x.moisture}%` : 'No probe reading');
+          const waiting = !!x.cycle || !!x.queued;
+          const purgeSec = x.raw && x.raw.purgeSec ? x.raw.purgeSec : 0;
           return (
             <div className="ctrl-row" key={x.n}>
               <div className="cl"><b className="ctrl-shelfno">{x.n}</b> {x.species || 'Unassigned'}{x.latin ? <em className="ctrl-sp"> {x.latin}</em> : null}<small>{now}{x.status ? ' · '+x.status : ''}{!x.active ? ' · disabled' : ''}</small></div>
               <div className="ctrl-btns">
-                <button className="fx-btn" disabled={!canManual || !!x.cycle || !x.active} onClick={()=>setConfirm(x.n)}>Water now</button>
-                <button className="fx-btn" disabled={!canManual || !!x.cycle || !x.active} onClick={()=>onDrain(x.n)}>Drain</button>
-                <button className="fx-btn danger" disabled={!canManual || !x.cycle} onClick={()=>onStop(x.n)}>Stop</button>
+                <button className="fx-btn" disabled={!canManual || waiting || !x.active} onClick={()=>setConfirm(x.n)}>Water now</button>
+                <button className="fx-btn" disabled={!canManual || waiting || !x.active || !purgeSec} title={purgeSec ? `Valve open ${purgeSec} s, pump off` : 'Purge is off for this shelf'} onClick={()=>onPurge && onPurge(x.n)}>Purge</button>
+                <button className="fx-btn" disabled={!canManual || waiting || !x.active} onClick={()=>onDrain(x.n)}>Drain</button>
+                <button className="fx-btn danger" disabled={!canManual || !waiting} onClick={()=>onStop(x.n)}>{x.queued && !x.cycle ? 'Cancel' : 'Stop'}</button>
               </div>
             </div>
           );
@@ -206,7 +212,7 @@ function useDemoControls(){
     manualFan: (m)=>{ s.live.fanOverride = m==='auto'?null:{mode:m,until:null}; s.live.fanOn = m==='on'; bump(x=>x+1); },
     setAutomation: (e)=>{ s.live.automation={...s.live.automation, enabled:e}; bump(x=>x+1); },
     setMaintenance: (e)=>{ s.live.maintenance=e; bump(x=>x+1); },
-    water: ()=>{}, drain: ()=>{}, stop: ()=>{},
+    water: ()=>{}, drain: ()=>{}, purge: ()=>{}, stop: ()=>{},
   }), [s, bump]);
 }
 
@@ -259,7 +265,7 @@ function ControlsTab({ role, controls }){
         <SchedulePanel title="Circulation fans" what="Fans" form={fans} live={{on:live.fanOn, override:live.fanOverride}}
           canEdit={canEdit} canManual={canManual} onManual={c.manualFan} onSave={saveSched('fans')}/>
       </div>
-      <ShelfActions list={shelfList} canManual={canManual} onWater={c.water} onDrain={c.drain} onStop={c.stop}/>
+      <ShelfActions list={shelfList} canManual={canManual} onWater={c.water} onDrain={c.drain} onPurge={c.purge} onStop={c.stop}/>
     </div>
   );
 }

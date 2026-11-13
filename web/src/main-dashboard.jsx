@@ -72,6 +72,7 @@ function makeControls(state, actions) {
     setMaintenance: (active) => actions.setMaintenance(active),
     water: (n) => actions.water(n),
     drain: (n) => actions.drain(n),
+    purge: (n) => actions.purge(n),
     stop: (n) => actions.stop(n),
   };
 }

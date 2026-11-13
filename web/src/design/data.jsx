@@ -12,6 +12,7 @@ PG.STATUS = {
   Monitoring:   { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'ATTENTION' },
   Watering:     { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'NORMAL' },
   Draining:     { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'NORMAL' }, // live-edit (ebb-flow): valve open, pump off, tray draining back
+  Queued:       { col:'var(--i-river)',   inkCol:'var(--river-deep)', sev:'WAITING' }, // 2026-11-13: in the one-shelf queue behind another cycle
   Dry:          { col:'var(--i-ochre)',   inkCol:'var(--ochre-deep)', sev:'ACTION REQUIRED' },
   'Sensor Fault':{col:'var(--i-oxblood)', inkCol:'var(--oxblood)',    sev:'ACTION REQUIRED' },
   Inactive:     { col:'var(--lcd-faint)', inkCol:'#1B181366',         sev:'—' },

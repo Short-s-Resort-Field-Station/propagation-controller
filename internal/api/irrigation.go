@@ -283,10 +283,14 @@ func (s *Server) handleRunZone(w http.ResponseWriter, r *http.Request) {
 // handleDrainZone opens a shelf's valve for its drain-back time with the pump
 // locked off (touch-screen "Drain"). Same queue as watering: one shelf at a
 // time. duration_seconds overrides the zone's drain_seconds; 0 = zone default.
+// purge: true (Austin, 2026-11-13) makes it a hand purge — the same valve
+// re-open the engine does after a drain, for the zone's purge_seconds, tagged
+// "purge" in the cycle history. Refused when the zone's purge is 0/off.
 func (s *Server) handleDrainZone(w http.ResponseWriter, r *http.Request) {
 	zoneKey := chi.URLParam(r, "zone_key")
 	var req struct {
 		DurationSeconds int    `json:"duration_seconds"`
+		Purge           bool   `json:"purge"`
 		Reason          string `json:"reason"`
 		Actor           string `json:"actor"`
 	}
@@ -304,12 +308,30 @@ func (s *Server) handleDrainZone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "actor must be api, manual_web, or manual_touch")
 		return
 	}
+	source := "drain"
+	if req.Purge {
+		source = "purge"
+		if req.DurationSeconds == 0 {
+			zone, err := s.zones.GetByKey(zoneKey)
+			if err != nil || zone == nil {
+				writeError(w, http.StatusNotFound, "zone not found")
+				return
+			}
+			var zcfg irrigation.ZoneConfig
+			json.Unmarshal([]byte(zone.ConfigJSON), &zcfg)
+			if zcfg.PurgeSeconds <= 0 {
+				writeError(w, http.StatusConflict, "purge is off for this zone (purge_seconds is 0)")
+				return
+			}
+			req.DurationSeconds = min(zcfg.PurgeSeconds, irrigation.MaxPurgeSeconds)
+		}
+	}
 	pos, err := s.irrigation.Enqueue(irrigation.Request{
 		ZoneKey:         zoneKey,
 		DurationSeconds: req.DurationSeconds,
 		DrainOnly:       true,
 		TriggerType:     actor,
-		TriggerSource:   "drain",
+		TriggerSource:   source,
 		Reason:          req.Reason,
 	})
 	if err != nil {
@@ -321,7 +343,8 @@ func (s *Server) handleDrainZone(w http.ResponseWriter, r *http.Request) {
 		status = "queued"
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status": status, "queue_position": pos, "zone_key": zoneKey, "drain": true,
+		"status": status, "queue_position": pos, "zone_key": zoneKey, "drain": true, "purge": req.Purge,
+		"duration_seconds": req.DurationSeconds,
 	})
 }
 

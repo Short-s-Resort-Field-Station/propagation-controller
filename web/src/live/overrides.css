@@ -203,3 +203,26 @@
 .rk2-plate .nm .lat { font-style: italic; font-size: .78em; }
 .rk2-lrow .sp em { font-style: italic; text-transform: none; }
 .rk2-detail .tg em { font-style: italic; text-transform: none; letter-spacing: 0; }
+
+/* ============ 2026-11-13: purge chooser + queue cancel ============ */
+/* Tapping Drain swaps the row for Purge · Drain · Cancel (no third permanent button). */
+.rk2-wrow.choose { grid-template-columns: 1fr 1fr auto; }
+.rk2-wrow.choose .rk2-wbtn { padding-left: 10px; padding-right: 10px; font-size: 17px; letter-spacing: 0.12em; gap: 0; }
+.rk2-wrow.choose .rk2-wbtn small { font-size: 13px; letter-spacing: 0.08em; text-transform: none; color: var(--sdim); margin-left: 2px; }
+.rk2-wrow.choose .rk2-dbtn:first-child { color: var(--river-l); border-color: var(--river-l); }
+.rk2-cancel { color: var(--sdim); }
+/* Armed post-drain purge: quiet text in the middle of the detail's top row, never a control. */
+.rk2-purgedue { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sdim); align-self: center; white-space: nowrap; }
+
+/* 2026-11-13 (Austin: "the line on the bottom of the frame goes through my
+   reservoir percentage"): the two-line Latin plate names (added 2026-11-10)
+   grew the plates ~17px, pushing the reservoir line 16px past the inner
+   frame on the fixed 528px canvas. Reclaim ~26px above it, dial untouched. */
+.rk2-sub { margin-bottom: 0; }
+.rk2-plate .ph { padding-top: 2px; padding-bottom: 2px; }
+.rk2-plate .nm { padding-top: 2px; padding-bottom: 0; }
+.rk2-plate .tp { margin-top: 0; }
+.rk2-plate .tag { margin-top: 1px; margin-bottom: 2px; }
+.rk2-resv .lab { margin-bottom: 3px; }
+.rk2-resv .pct { margin-top: 1px; }
+/* (header padding-top stays 18px — trimming it put the eyebrow on the frame line) */

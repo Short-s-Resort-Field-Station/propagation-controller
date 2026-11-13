@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { api, BASE } from './api.js';
-import { FANS_RELAY, buildAutomation } from './adapter.js';
+import { FANS_RELAY, PUMP_RELAY, buildAutomation } from './adapter.js';
 import { PG } from '../design/data.jsx';
 import {
   buildShelves, buildRackStatus, buildLog, buildReservoir, buildLockouts,
@@ -47,6 +47,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
     // Fan scheduler (2026-11-10): active manual override, or null; relay state.
     fanOverride: null,
     fanOn: false,
+    pumpOn: false,
     // Watering automation switch + morning window.
     automation: { enabled: false, window: null },
     // Audit 3.1: the last rejected command, { text, at } or null.
@@ -130,6 +131,8 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
           : null,
         fanOn: fans ? fans.relay_state === 'on'
           : (relays.relays || []).some((r) => r.channel === FANS_RELAY && r.state === 'on'),
+        // The pump relay as the board reads it back (list face footer, 2026-11-13).
+        pumpOn: (relays.relays || []).some((r) => r.channel === PUMP_RELAY && r.state === 'on'),
         automation,
       }));
     } catch {
@@ -220,6 +223,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
     return {
       water: (shelf) => shelf ? run('Water', api.runZone(zoneKeyFor(shelf), surface)) : Promise.resolve(false),
       drain: (shelf) => shelf ? run('Drain', api.drainZone(zoneKeyFor(shelf), surface)) : Promise.resolve(false),
+      purge: (shelf) => shelf ? run('Purge', api.purgeZone(zoneKeyFor(shelf), surface)) : Promise.resolve(false),
       stop: (shelf) => shelf ? run('Stop', api.stopZone(zoneKeyFor(shelf), surface)) : Promise.resolve(false),
       // opts.expiresMinutes > 0 → the override lapses back to the schedule
       // (dashboard toggle, audit 3.10). mode 'auto' clears any override.

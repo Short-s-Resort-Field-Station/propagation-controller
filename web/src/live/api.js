@@ -98,6 +98,9 @@ export const api = {
 
   runZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/run`, { actor, reason: 'water now' }),
   drainZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/drain`, { actor, reason: 'drain tray' }),
+  // Hand purge (2026-11-13): same valve-open/pump-off as Drain, but for the
+  // shelf's purge_seconds; the backend tags it "purge" in history.
+  purgeZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/drain`, { actor, purge: true, reason: 'purge tray' }),
   stopZone: (zoneKey, actor) => post(`/irrigation/zones/${zoneKey}/stop`, { actor }),
   patchZone: (zoneKey, body) => req(`/irrigation/zones/${zoneKey}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

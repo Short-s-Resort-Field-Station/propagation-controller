@@ -161,3 +161,39 @@ describe('buildMaintenance', () => {
     expect(buildMaintenance({ settings: { maintenance: '{nope' } })).toBe(false);
   });
 });
+
+describe('queue + purge (2026-11-13)', () => {
+  it('a shelf waiting in the engine queue reads Queued, with kind and who it waits behind', () => {
+    const engine = {
+      active_cycle: { zone_key: 'zone_1', state: 'flooding', duration_seconds: 60 },
+      queue: [
+        { zone_key: 'zone_2', drain_only: true, trigger_source: 'drain' },
+        { zone_key: 'zone_3', duration_seconds: 60 },
+      ],
+      pending_purges: [],
+    };
+    const zones = [zone({ zone_key: 'zone_1', name: 'Shelf 1' }), zone(), zone({ zone_key: 'zone_3', name: 'Shelf 3' })];
+    const [s1, s2, s3] = buildShelves(inputs({ zones, engine }));
+    expect(s1.status).toBe('Watering');
+    expect(s1.queued).toBeNull();
+    expect(s2.status).toBe('Queued');
+    expect(s2.queued).toEqual({ pos: 2, kind: 'Drain', behind: '01' });
+    expect(s3.status).toBe('Queued');
+    expect(s3.queued).toEqual({ pos: 3, kind: 'Water', behind: '02' });
+  });
+  it('a queued shelf with nothing running has no "behind" and keeps Queued under maintenance', () => {
+    const engine = { active_cycle: null, queue: [{ zone_key: 'zone_2', drain_only: true, trigger_source: 'purge' }] };
+    const [s] = buildShelves(inputs({ engine, maintenance: true }));
+    expect(s.status).toBe('Queued');
+    expect(s.queued).toEqual({ pos: 1, kind: 'Purge', behind: null });
+  });
+  it('surfaces an armed post-drain purge on its shelf only', () => {
+    const due = iso(-30 * 60e3);
+    const engine = { active_cycle: null, queue: [], pending_purges: [{ zone_key: 'zone_2', due_at: due, seconds: 60 }] };
+    const zones = [zone(), zone({ zone_key: 'zone_3', name: 'Shelf 3' })];
+    const [s2, s3] = buildShelves(inputs({ zones, engine }));
+    expect(s2.purgeDue).toEqual({ at: due, seconds: 60 });
+    expect(s3.purgeDue).toBeNull();
+    expect(s2.status).toBe('Healthy');
+  });
+});

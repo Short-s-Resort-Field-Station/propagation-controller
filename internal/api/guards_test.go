@@ -71,6 +71,9 @@ func newGuardServer(t *testing.T) (*Server, http.Handler) {
 	r.Post("/relays/{channel}/set", s.handleSetRelay)
 	r.Post("/diagnostics/modbus/scan", s.handleModbusScan)
 	r.Post("/system/shutdown", s.handleSystemShutdown)
+	r.Post("/irrigation/zones/{zone_key}/drain", s.handleDrainZone)
+	r.Post("/irrigation/zones/{zone_key}/stop", s.handleStopZone)
+	s.zones = zones
 	return s, r
 }
 
@@ -92,6 +95,18 @@ func waitFlooding(t *testing.T, engine *irrigation.Engine) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("cycle never reached flooding")
+}
+
+func waitIdle(t *testing.T, engine *irrigation.Engine) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := engine.Status(); st.Active == nil && len(st.Queue) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("engine never went idle")
 }
 
 // TestPumpOnRequiresBoundedTimeout (audit 2.4): a raw pump-on without a
@@ -186,5 +201,80 @@ func TestSystemShutdownMakesSafeThenPowersOff(t *testing.T) {
 	case <-called:
 	case <-time.After(4 * time.Second):
 		t.Fatal("power-off hook not called")
+	}
+}
+
+// TestHandPurgeUsesZonePurgeSeconds (Austin, 2026-11-13): purge:true on the
+// drain endpoint is a drain-only cycle for the zone's purge_seconds, tagged
+// "purge"; a zone with purge off refuses it.
+func TestHandPurgeUsesZonePurgeSeconds(t *testing.T) {
+	s, h := newGuardServer(t)
+	zone, err := s.zones.GetByKey("zone_1")
+	if err != nil || zone == nil {
+		t.Fatalf("zone_1: %v", err)
+	}
+	var zcfg irrigation.ZoneConfig
+	json.Unmarshal([]byte(zone.ConfigJSON), &zcfg)
+	zcfg.PurgeSeconds = 45
+	cfg, _ := json.Marshal(zcfg)
+	zone.ConfigJSON = string(cfg)
+	if err := s.zones.Update(*zone); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+
+	w := post(h, "/irrigation/zones/zone_1/drain", `{"actor":"manual_touch","purge":true}`)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("purge: status %d body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["duration_seconds"] != float64(45) || resp["purge"] != true {
+		t.Errorf("purge response %v, want duration 45 and purge true", resp)
+	}
+	// A second request for the same shelf lands in conflict (already running or queued).
+	if w := post(h, "/irrigation/zones/zone_1/drain", `{"actor":"manual_touch","purge":true}`); w.Code != http.StatusConflict {
+		t.Errorf("duplicate purge: status %d, want 409", w.Code)
+	}
+	s.irrigation.StopAll("test")
+	waitIdle(t, s.irrigation)
+
+	// Purge off for the zone → refused, nothing queued.
+	zcfg.PurgeSeconds = 0
+	cfg, _ = json.Marshal(zcfg)
+	zone.ConfigJSON = string(cfg)
+	if err := s.zones.Update(*zone); err != nil {
+		t.Fatalf("update zone: %v", err)
+	}
+	if w := post(h, "/irrigation/zones/zone_1/drain", `{"actor":"manual_touch","purge":true}`); w.Code != http.StatusConflict {
+		t.Errorf("purge with purge off: status %d body %s, want 409", w.Code, w.Body.String())
+	}
+	if st := s.irrigation.Status(); st.Active != nil || len(st.Queue) != 0 {
+		t.Errorf("refused purge still reached the engine: %+v", st)
+	}
+}
+
+// TestStopDequeuesWaitingShelf: a shelf queued behind another's cycle can be
+// taken back out with the stop endpoint (touch-screen Cancel, 2026-11-13).
+func TestStopDequeuesWaitingShelf(t *testing.T) {
+	s, h := newGuardServer(t)
+	if _, err := s.irrigation.Enqueue(irrigation.Request{ZoneKey: "zone_1", DurationSeconds: 60, TriggerType: "manual_web"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitFlooding(t, s.irrigation)
+	if w := post(h, "/irrigation/zones/zone_2/drain", `{"actor":"manual_touch"}`); w.Code != http.StatusAccepted {
+		t.Fatalf("queue drain: status %d body %s", w.Code, w.Body.String())
+	}
+	if st := s.irrigation.Status(); len(st.Queue) != 1 || st.Queue[0].ZoneKey != "zone_2" {
+		t.Fatalf("queue = %+v, want zone_2 waiting", st.Queue)
+	}
+	if w := post(h, "/irrigation/zones/zone_2/stop", `{"actor":"manual_touch"}`); w.Code != http.StatusOK {
+		t.Fatalf("cancel queued: status %d body %s", w.Code, w.Body.String())
+	}
+	st := s.irrigation.Status()
+	if len(st.Queue) != 0 {
+		t.Errorf("queue still holds %+v after cancel", st.Queue)
+	}
+	if st.Active == nil || st.Active.ZoneKey != "zone_1" {
+		t.Errorf("cancelling the queued shelf disturbed the running one: %+v", st.Active)
 	}
 }

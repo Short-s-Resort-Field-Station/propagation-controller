@@ -78,7 +78,7 @@ function App(){
           lockouts={v.lockouts||[]} toast={v.toast||null} lastSync={v.lastSync||'14:32'}
           layout="gauges" clock="14:32" day="07 / 09 / 26" theme="dark"
           maintenance={!!v.maintenance} initialOpen={v.initialOpen||null}
-          onWater={()=>Promise.resolve(true)} onDrain={()=>Promise.resolve(true)} onStop={()=>Promise.resolve(true)}
+          onWater={()=>Promise.resolve(true)} onDrain={()=>Promise.resolve(true)} onPurge={()=>Promise.resolve(true)} onStop={()=>Promise.resolve(true)}
           onLight={()=>{}} onFan={()=>{}} onThemeToggle={()=>{}}
           onSetMaintenance={()=>{}} onSetEnabled={()=>{}} onUnlock={()=>{}} connection={v.connection||'online'} locked={false} />
       </div>

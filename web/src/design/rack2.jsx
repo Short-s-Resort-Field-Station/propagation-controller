@@ -9,7 +9,7 @@ import { LockScreen } from './flows.jsx';
 
 const SC2 = {
   Healthy:'var(--rk2-accent)', Monitoring:'var(--ochre-l)', Watering:'var(--river-l)',
-  Draining:'var(--river-l)', // live-edit (ebb-flow)
+  Draining:'var(--river-l)', Queued:'var(--river-l)', // live-edit (ebb-flow); Queued 2026-11-13
   Dry:'var(--ochre-l)', 'Sensor Fault':'var(--oxblood-l)', Inactive:'var(--sfaint)',
   Maintenance:'var(--ochre-l)', Disabled:'var(--sfaint)', // change 2
   'Locked Out':'var(--oxblood-l)' // audit 3.11
@@ -84,8 +84,11 @@ function Plate({ s, onOpen }){
   return (
     <div className="rk2-plate" onClick={()=>onOpen(s)}>
       <div className="ph">Shelf · {s.n}</div>
-      {/* audit 3.12: long names clamp to two lines inside the centred box */}
-      <div className={'nm'+((s.species||'').length>22?' long':'')}><span className="clamp">{s.species}{s.latin ? <em className="lat"> {s.latin}</em> : null}</span></div>
+      {/* audit 3.12: long names clamp to two lines inside the centred box.
+          2026-11-13 (Austin): the plate shows the Latin names only — common +
+          Latin ran to four lines and clipped; two Latin binomials fit in two.
+          Common names stay on the detail screen and the ledger. */}
+      <div className={'nm'+((s.latin||s.species||'').length>22?' long':'')}><span className="clamp">{s.latin ? <em className="lat">{s.latin}</em> : s.species}</span></div>
       <div className="dial"><DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={100} active={s.probe}/></div>
       {s.probe
         ? <div className="rd">{s.moisture} <small>%VWC</small></div>
@@ -133,7 +136,7 @@ function Ledger({ shelves, onOpen }){
   );
 }
 
-function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pending=false, theme, onLight, onFan, maintenance, onSetMaintenance, onSetEnabled, connection='online', lastSync='—' }){
+function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, watering, busy=false, pending=false, theme, onLight, onFan, maintenance, onSetMaintenance, onSetEnabled, connection='online', lastSync='—' }){
   const col = watering ? 'var(--river-l)' : (SC2[s.status] || 'var(--sfaint)');
   const label = watering ? 'Watering' : s.status;
   const sev = watering ? PG.STATUS['Watering'].sev : (PG.STATUS[s.status] || PG.STATUS.Inactive).sev;
@@ -143,6 +146,14 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
   // Audit 3.6: offline → every control is inert and says so.
   const offline = connection==='offline';
   const [confirmWater, setConfirmWater] = React.useState(false);
+  // Drain chooser (Austin, 2026-11-13): one Drain button; a tap swaps the row
+  // for Purge (the shelf's purge_seconds) / Drain (full drain-back) / Cancel,
+  // so a hand purge costs no extra permanent control.
+  const [chooseDrain, setChooseDrain] = React.useState(false);
+  React.useEffect(()=>{ if(busy||offline||disabled||pending) setChooseDrain(false); }, [busy, offline, pending]);
+  const purgeSec = s.raw && s.raw.purgeSec ? s.raw.purgeSec : 0;
+  const drainMin = s.raw && s.raw.drainMin ? s.raw.drainMin : 0;
+  const fmtSecs = (sec)=> sec>=120 ? `${Math.round(sec/60)} min` : `${sec} s`;
   const tapWater = ()=>{ if(offline||pending) return; if(maintenance){ setConfirmWater(true); } else { onWater && onWater(); } };
   const guard = (fn)=>(...a)=>{ if(offline) return; fn && fn(...a); };
   const tN = (s.temp-60)/30*100;
@@ -161,6 +172,12 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
       <div className="rk2-dinner">
         <div className="rk2-dtop">
           <button className="rk2-plaque" onClick={onBack}>‹ Return</button>
+          {/* An armed post-drain purge sits in the spare middle of the top row
+              (no extra line — the 480-px panel has none to give) so nobody
+              purges by hand what the engine is about to do anyway. */}
+          {!offline && !busy && !disabled && s.purgeDue ? (
+            <span className="rk2-purgedue">Auto purge · {fmtSecs(s.purgeDue.seconds)} at {fmtUntil(s.purgeDue.at)}</span>
+          ) : null}
           <span className="rk2-plaque" style={{color:col,borderColor:col}}><span style={{width:6,height:6,background:col,transform:'rotate(45deg)',display:'inline-block'}}></span>{label} · {sev}</span>
         </div>
         <div className="rk2-dname">
@@ -227,18 +244,35 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
               <div className="rk2-pump"><div className="tk"></div><span className="lbl">{cycleLabel(s.cycle, s.status==='Draining' ? 'Draining' : 'Cycle running')}</span></div>
               <button className="rk2-wbtn rk2-dbtn rk2-stop" disabled={pending} onClick={()=>onStop && onStop()} title="Stop this cycle: pump off, valve closed">Stop</button>
             </div>
+          ) : s.queued ? (
+            // Queued (Austin, 2026-11-13): the shelf is waiting behind another
+            // cycle — say so, and let it be taken back out of the queue.
+            <div className="rk2-wrow busy">
+              <div className="rk2-pump"><div className="tk"></div><span className="lbl">{`${s.queued.kind} queued${s.queued.behind ? ` · after Shelf ${s.queued.behind}` : ''}`}</span></div>
+              <button className="rk2-wbtn rk2-dbtn rk2-stop" disabled={pending} onClick={()=>onCancel && onCancel()} title="Remove this shelf from the irrigation queue">Cancel</button>
+            </div>
           ) : watering ? (
             <div className="rk2-pump"><div className="tk"></div><span className="lbl">{cycleLabel(s.cycle, 'Cycle accepted · starting')}</span></div>
           ) : disabled ? (
             <div className="rk2-plaque" style={{justifyContent:'center',width:'100%',color:'var(--sfaint)'}}>Shelf disabled — enable to water</div>
+          ) : chooseDrain ? (
+            <div className="rk2-wrow choose">
+              <button className="rk2-wbtn rk2-dbtn" disabled={pending || !purgeSec} onClick={()=>{ setChooseDrain(false); if(onPurge) onPurge(); }}
+                title="Open valve briefly, pump off, to clear trickle-down">Purge{purgeSec ? <small> · {fmtSecs(purgeSec)}</small> : <small> · off</small>}</button>
+              <button className="rk2-wbtn rk2-dbtn" disabled={pending} onClick={()=>{ setChooseDrain(false); if(onDrain) onDrain(); }}
+                title="Open valve for the full drain-back time, pump off">Drain{drainMin ? <small> · {drainMin} min</small> : null}</button>
+              <button className="rk2-wbtn rk2-dbtn rk2-cancel" onClick={()=>setChooseDrain(false)}>Cancel</button>
+            </div>
           ) : (
             <div className="rk2-wrow">
               <button className="rk2-wbtn" disabled={pending} onClick={tapWater}><span className="d"></span>{pending ? 'Sending…' : 'Water Now'}<span className="d"></span></button>
               {/* Drain (Austin, 2026-11-10): valve open for the drain-back time, pump locked off —
-                  for a tray left full by an interrupted cycle. */}
-              <button className="rk2-wbtn rk2-dbtn" disabled={pending} onClick={()=>{ if(!pending && onDrain) onDrain(); }} title="Open valve, pump off, drain back to reservoir">Drain</button>
+                  for a tray left full by an interrupted cycle. Since 2026-11-13 a
+                  tap opens the Purge / Drain chooser above. */}
+              <button className="rk2-wbtn rk2-dbtn" disabled={pending} onClick={()=>{ if(!pending) setChooseDrain(true); }} title="Purge or drain this tray (pump stays off)">Drain</button>
             </div>
           )}
+
           {/* change 2: per-shelf disable toggle + system maintenance toggle */}
           <div className="rk2-actions">
             <button className="rk2-plaque" style={{justifyContent:'center'}} disabled={offline}
@@ -271,7 +305,7 @@ function Detail2({ s, onBack, onWater, onDrain, onStop, watering, busy=false, pe
   );
 }
 
-function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onStop, onShutdown, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
+function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
   // Easter egg (Austin, 2026-11-10): press and hold the title for 3 s to get
   // the power-down popup. Nothing visible, nothing to
@@ -315,7 +349,10 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
   };
   const doWater = ()=>{ if(busy) return; fire(onWater, current, ()=>setWatering(true)); };
   const doDrain = ()=>{ if(busy) return; fire(onDrain, current); };
+  const doPurge = ()=>{ if(busy) return; fire(onPurge, current); };
   const doStop = ()=>{ fire(onStop, current, ()=>setWatering(false)); };
+  // Cancel a queued request: the engine's stop dequeues a waiting shelf (2026-11-13).
+  const doCancel = ()=>{ fire(onStop, current, ()=>setWatering(false)); };
   // Audit 3.7/3.11: one status line carries offline / lockouts / maintenance,
   // so no extra banner competes with the three plates for height.
   const statusText = connection==='offline' ? 'Controller Offline'
@@ -373,7 +410,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
         </div>
       </div>
 
-      {current && <Detail2 s={current} watering={watering} busy={busy} pending={pending} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onDrain={doDrain} onStop={doStop} onLight={onLight} onFan={onFan}
+      {current && <Detail2 s={current} watering={watering} busy={busy} pending={pending} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onDrain={doDrain} onPurge={doPurge} onCancel={doCancel} onStop={doStop} onLight={onLight} onFan={onFan}
         maintenance={maintenance} onSetMaintenance={onSetMaintenance} onSetEnabled={onSetEnabled} connection={connection} lastSync={lastSync}/>}
       {/* the toast also shows over the detail screen */}
       {current && toast && (
