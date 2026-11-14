@@ -6,6 +6,17 @@ import React from 'react';
 import { api, BASE } from './api.js';
 import { FANS_RELAY, PUMP_RELAY, buildAutomation } from './adapter.js';
 import { PG } from '../design/data.jsx';
+
+// 2026-11-14: the kiosk's Chromium kept the old page across a daemon upgrade
+// (needed a sudo restart of the kiosk). The health build stamp changes with
+// every install; when it does, the page reloads itself.
+let seenBuild = null;
+function reloadOnNewBuild(health) {
+  const b = health && health.build;
+  if (!b) return;
+  if (seenBuild && seenBuild !== b && typeof location !== 'undefined') { location.reload(); return; }
+  seenBuild = b;
+}
 import {
   buildShelves, buildRackStatus, buildLog, buildReservoir, buildLockouts,
   buildSpeciesCatalog, buildMaintenance, fmtClock,
@@ -104,6 +115,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
       tickRef.current++;
       if (seq !== seqRef.current) return; // a newer refresh already landed
 
+      reloadOnNewBuild(health);
       const shelves = buildShelves({ zonesResp, sensorsResp, lighting, relays, rules: rulesRef.current, maintenance });
       shelvesRef.current = shelves;
       const reservoir = buildReservoir(sensorsResp);

@@ -1,6 +1,7 @@
 import React from 'react';
 import { PG } from './data.jsx';
 import { LockScreen } from './flows.jsx';
+import { DialG, Drop } from './rack3.jsx';
 
 // pgui-rack2.jsx — ROUND 2: sculptural instrument-panel treatment.
 // Same functionality (tap shelf → detail, Water Now, reservoir, two layouts)
@@ -66,37 +67,50 @@ function DialGauge({ value, lo, hi, accent, size=82, active=true, marker=false, 
   );
 }
 
+// 2026-11-14 (Austin, after a night on the list face: "everything is far too
+// small … back to the v2 of our original design, but with the oxblood
+// dials"). The plate is the "Out of curiosity" mockup from the exploration
+// page: common names, Latin beneath, dial G maxed to its box, the reading,
+// temp · EC, a status tag with the drop glyph for water states. TARGET gone.
+function useBoxSize(ref){
+  const [size, setSize] = React.useState(0);
+  React.useLayoutEffect(()=>{
+    const el = ref.current; if(!el) return;
+    const measure = ()=>{ const r = el.getBoundingClientRect(); setSize(Math.max(0, Math.floor(Math.min(r.width, r.height)))); };
+    measure();
+    if(typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    return ()=>ro.disconnect();
+  }, [ref]);
+  return size;
+}
+const WATER_STATES = { Watering:1, Draining:1, Queued:1 };
 function Plate({ s, onOpen }){
   const col = SC2[s.status] || 'var(--sfaint)';
-  // change 2: only a truly empty bay is "Vacant"; a paused (assigned but
-  // disabled) shelf falls through to the normal plate — dimmed, still tappable
-  // so it can be re-enabled from the detail view.
-  if(!s.active && !s.assigned) return (
-    <div className="rk2-plate vacant">
-      <div className="ph">Shelf · {s.n}</div>
-      <div className="nm" style={{color:'var(--sfaint)'}}>Vacant Bay</div>
-      <div className="dial"><DialGauge value={0} lo={s.lo} hi={s.hi} accent={col} size={100} active={false}/></div>
-      <div className="rd noprobe" style={{color:'var(--sfaint)'}}>standby</div>
-      <div className="tp">No specimen</div>
-      <div className="tag" style={{color:'var(--sfaint)'}}><span className="d"></span>Vacant</div>
-    </div>
-  );
+  const box = React.useRef(null);
+  const size = useBoxSize(box) || 120;
+  const vacant = !s.active && !s.assigned;
+  const status = vacant ? 'Vacant' : (s.queued ? 'Queued' : s.status);
+  const chip = status==='Dry' && s.nextCheck ? `Dry · next ${s.nextCheck}` : status;
+  // One species per line (two names always fit; a 38-character pair never did).
+  const lines = (txt, sep) => String(txt || '').split(sep).map(t => t.trim()).filter(Boolean);
+  const common = vacant ? ['Vacant Bay'] : lines(s.species, ' + ');
+  const latin = vacant ? ['No specimen'] : lines(s.latin, ' · ');
   return (
-    <div className="rk2-plate" onClick={()=>onOpen(s)}>
+    <div className={'rk2-plate'+(vacant?' vacant':'')} onClick={()=>!vacant && onOpen(s)}>
       <div className="ph">Shelf · {s.n}</div>
-      {/* audit 3.12: long names clamp to two lines inside the centred box.
-          2026-11-13 (Austin): the plate shows the Latin names only — common +
-          Latin ran to four lines and clipped; two Latin binomials fit in two.
-          Common names stay on the detail screen and the ledger. */}
-      <div className={'nm'+((s.latin||s.species||'').length>22?' long':'')}><span className="clamp">{s.latin ? <em className="lat">{s.latin}</em> : s.species}</span></div>
-      <div className="dial"><DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={100} active={s.probe}/></div>
-      {s.probe
+      <div className="cn" style={vacant?{color:'var(--sfaint)'}:undefined}>{common.map((t,i)=><span key={i}>{t}</span>)}</div>
+      <div className="lt">{latin.length ? latin.map((t,i)=><span key={i}>{t}</span>) : <span>&nbsp;</span>}</div>
+      <div className="dial" ref={box}>
+        <DialG value={s.moisture} lo={s.lo} hi={s.hi} active={!!s.probe && !vacant} hasBand={s.hasRule!==false} size={size}/>
+      </div>
+      {s.probe && !vacant
         ? <div className="rd">{s.moisture} <small>%VWC</small></div>
-        : <div className="rd noprobe">no probe</div>}
-      {/* .tp is nowrap — with an EC reading the labelled form clips, so the
-          probed shelf gets the compact "69°F · EC 1131" form instead. */}
-      <div className="tp">{targetText(s)}<br/>{s.ec!=null ? `${tempText(s)} · EC ${s.ec}` : `Root Zone · ${tempText(s)}`}</div>
-      <div className="tag" style={{color:col}}><span className="d"></span>{s.status}</div>
+        : <div className="rd noprobe" style={vacant?{color:'var(--sfaint)'}:undefined}>{vacant ? 'standby' : 'no probe'}</div>}
+      <div className="tp">{vacant ? '\u00a0' : `${tempText(s)} · EC ${s.ec!=null ? s.ec : '—'}`}</div>
+      <div className="tag" style={{color: vacant ? 'var(--sfaint)' : col}}>
+        {WATER_STATES[status] ? <Drop hollow={status==='Queued'}/> : <span className="d"></span>}{chip}
+      </div>
     </div>
   );
 }
@@ -382,9 +396,9 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
         </div>
         <div className="rk2-div"><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
         <div className="rk2-sub">
-          <span className="date">Day · <b>{day || '06 / 21 / 26'}</b></span>
+          <span className="date"><span className="k">Day</span><b>{day || '06 / 21 / 26'}</b></span>
           <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{statusText}</span>
-          <span className="time">Time · <b>{clock}</b></span>
+          <span className="time"><span className="k">Time</span><b>{clock}</b></span>
         </div>
 
         {/* audit 3.1: the last rejected command, over the status row */}
@@ -402,7 +416,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
 
         <div className="rk2-resv">
           <div className="lab"><span className="ln"></span>Reservoir · {PG.TANK_L} L Tank<span className="ln"></span></div>
-          <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div></div>
+          <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div><div className="floor" title="lockout floor · 20%"></div></div>
           {/* audit 3.9: a stale level probe reads "— %" / "sensor offline"; liters and days are estimates */}
           {reservoirOnline
             ? <div className="pct"><b>{reservoir}%</b> · est. {PG.tankLiters(reservoir)} L on hand · est. {PG.tankDays(reservoir)} days</div>

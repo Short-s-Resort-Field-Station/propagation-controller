@@ -1,4 +1,5 @@
 .PHONY: build test run-sim linux clean web
+BUILD_STAMP ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo nogit)-$(shell date -u +%Y%m%d%H%M)
 
 BIN := bin
 
@@ -22,7 +23,7 @@ run-sim: build
 
 # Cross-compile for the Piconium (x86_64, static — no CGo thanks to modernc sqlite).
 linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BIN)/propagationd-linux-amd64 ./cmd/propagationd
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X propagation-controller/internal/version.Build=$(BUILD_STAMP)" -o $(BIN)/propagationd-linux-amd64 ./cmd/propagationd
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BIN)/propagation-watchdog-linux-amd64 ./cmd/propagation-watchdog
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BIN)/probe-address-linux-amd64 ./cmd/probe-address
 

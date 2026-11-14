@@ -345,4 +345,4 @@ function RackDisplay3({ shelves, reservoir, reservoirOnline = true, rackStatus, 
   );
 }
 
-export { RackDisplay3, DialG, HoldBar };
+export { RackDisplay3, DialG, HoldBar, Drop };

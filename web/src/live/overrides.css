@@ -226,3 +226,38 @@
 .rk2-resv .lab { margin-bottom: 3px; }
 .rk2-resv .pct { margin-top: 1px; }
 /* (header padding-top stays 18px — trimming it put the eyebrow on the frame line) */
+
+/* 2026-11-14 — plates face, "Out of curiosity" (Austin: the list face was far
+   too small; back to v2 with the oxblood dials, maxed to their boxes). Every
+   vertical pixel saved above and below the plates goes to the dials. */
+.rk2-eye { font-size: 11px; }
+.rk2-ttl { font-size: 31px; margin-top: 3px; }
+.rk2-div { margin: 5px 0 4px; }
+.rk2-sub { margin-bottom: 2px; }
+.rk2-sub .date, .rk2-sub .time { display: flex; flex-direction: column; gap: 0; letter-spacing: .22em; font-size: 10px; }
+.rk2-sub .time { align-items: flex-end; }
+.rk2-sub .date b, .rk2-sub .time b { font-family: "Zilla Slab", serif; font-weight: 900; font-size: 19px; letter-spacing: .03em; line-height: 1.1; color: var(--sink); }
+.rk2-status { padding: 5px 16px; font-size: 12px; }
+.rk2-plates { gap: 12px; min-height: 0; }
+.rk2-plate { position: relative; overflow: visible; border-radius: 4px; padding: 7px 6px 6px; min-height: 0; margin-top: 10px; }
+.rk2-plate .ph { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); width: auto; padding: 0 9px; border: 1px solid var(--sline); border-radius: 3px; background: var(--rk3-face, #2E4A46); font-size: 11px; line-height: 16px; letter-spacing: .22em; color: var(--sdim); }
+.rk2-screen.light .rk2-plate .ph { background: #ECE3CE; }
+.rk2-plate .cn { font-family: "Newsreader", serif; font-size: 16.5px; line-height: 1.15; color: var(--sink); text-align: center; width: 100%; margin-top: 3px; display: flex; flex-direction: column; min-height: 38px; justify-content: center; }
+.rk2-plate .cn span, .rk2-plate .lt span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rk2-plate .lt { font-family: "Newsreader", serif; font-style: italic; font-size: 12.5px; line-height: 1.2; color: var(--sdim); text-align: center; width: 100%; display: flex; flex-direction: column; min-height: 30px; justify-content: center; margin-top: 1px; }
+.rk2-plate .dial { flex: 1 1 0; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; padding: 3px 0 0; }
+.rk2-plate .dial svg { display: block; }
+.rk2-plate .rd { font-size: 28px; margin-top: 0; }
+.rk2-plate .rd small { font-size: 12px; }
+.rk2-plate .rd.noprobe { font-size: 13px; margin-top: 8px; }
+.rk2-plate .tp { font-size: 12px; margin-top: 1px; letter-spacing: .12em; }
+.rk2-plate .tag { font-size: 12px; padding: 4px 12px; margin: 4px 0 0; }
+.rk2-plate .tag .rk3-drop { margin-right: 7px; }
+.rk2-plate.vacant { opacity: .6; }
+.rk2-resv { flex-direction: row; align-items: center; gap: 14px; margin-top: 8px; }
+.rk2-resv .lab { margin-bottom: 0; white-space: nowrap; font-size: 12.5px; }
+.rk2-resv .lab .ln { display: none; }
+.rk2-measure { flex: 1; width: auto !important; overflow: visible; }
+.rk2-measure .floor { position: absolute; top: -3px; bottom: -3px; left: 20%; border-left: 1.5px dashed var(--oxblood-l); opacity: .75; }
+.rk2-resv .pct { margin-top: 0 !important; white-space: nowrap; font-size: 12.5px !important; }
+.rk2-resv .pct b { font-size: 20px; }

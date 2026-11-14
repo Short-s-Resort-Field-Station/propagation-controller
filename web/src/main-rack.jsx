@@ -43,11 +43,11 @@ function App() {
   // Deep-links for kiosk shortcuts and testing:
   //   /ui/touch#shelf-1       — open a shelf detail
   //   /ui/touch#theme-light   — force a theme (also persists)
-  //   /ui/touch#face-plates   — the round-2 three-plate face (also persists)
-  //   /ui/touch#face-list     — the round-3 list face (default since 2026-11-13)
+  //   /ui/touch#face-plates   — the round-2 three-plate face (default again since 2026-11-14)
+  //   /ui/touch#face-list     — the round-3 list face (parked: too small on the 5" panel)
   const hash = typeof location !== 'undefined' ? location.hash : '';
   const faceMatch = hash.match(/face-(plates|list)/);
-  const face = faceMatch ? faceMatch[1] : (localStorage.getItem('rackFace') || 'list');
+  const face = faceMatch ? faceMatch[1] : (localStorage.getItem('rackFace') || 'plates');
   React.useEffect(() => { if (faceMatch) localStorage.setItem('rackFace', faceMatch[1]); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const shelfMatch = hash.match(/shelf-(\d+)/);
   const initialOpen = shelfMatch ? String(shelfMatch[1]).padStart(2, '0') : null;

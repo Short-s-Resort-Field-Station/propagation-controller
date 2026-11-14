@@ -26,6 +26,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":            status,
 		"version":           version.Version,
+		"build":             version.Build,
 		"uptime_seconds":    int(time.Since(s.startedAt).Seconds()),
 		"database":          dbStatus,
 		"relay_controller":  relayHealth.Status,
