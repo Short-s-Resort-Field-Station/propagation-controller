@@ -132,6 +132,10 @@ type Service struct {
 	// sendFn is swapped by the tests; production posts through webpush-go.
 	sendFn func(ctx context.Context, sub storage.PushSubscription, payload []byte, urgent bool) (int, error)
 	tick   time.Duration
+	// Maintenance reports the rack's maintenance switch. While it is on the
+	// dry watcher stays quiet: pulling probes for calibration (Austin,
+	// 2026-11-15) must not page anyone, same as the dashboard alarms.
+	Maintenance func() bool
 }
 
 type zoneInfo struct {
@@ -351,8 +355,8 @@ func (s *Service) dryTick(ctx context.Context) {
 	s.dryInit = true
 	crossed := DryTransitions(s.dryFlag, rules, latest, time.Now())
 	s.mu.Unlock()
-	if first {
-		return // a shelf already dry at startup is not news every restart
+	if first || (s.Maintenance != nil && s.Maintenance()) {
+		return // startup state is not news; maintenance means probes may be out
 	}
 	for _, r := range crossed {
 		n, species := s.shelf(r.ZoneKey)

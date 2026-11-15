@@ -238,3 +238,53 @@ func TestPrefsFromJSON(t *testing.T) {
 		t.Error("unknown category kept")
 	}
 }
+
+type fakeRules struct{ rules []storage.MoistureRule }
+
+func (f fakeRules) ListEnabled() ([]storage.MoistureRule, error) { return f.rules, nil }
+
+type fakeReadings struct {
+	mu sync.Mutex
+	v  map[string]float64
+}
+
+func (f *fakeReadings) Latest(k string) (*storage.StoredReading, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &storage.StoredReading{SensorKey: k, Value: f.v[k], ReadAt: time.Now()}, nil
+}
+func (f *fakeReadings) set(k string, v float64) { f.mu.Lock(); f.v[k] = v; f.mu.Unlock() }
+
+func TestDryWatcherQuietInMaintenance(t *testing.T) {
+	repo := openRepo(t)
+	_ = repo.Upsert(storage.PushSubscription{Username: "a", Endpoint: "https://p/1", P256dh: "k", Auth: "a", PrefsJSON: `{}`})
+	fs := &fakeSender{}
+	rd := &fakeReadings{v: map[string]float64{"s1": 30}}
+	hub := bus.New()
+	s := New(Keys{}, repo, hub, nil, fakeRules{[]storage.MoistureRule{{ZoneKey: "zone_1", SensorKey: "s1", TriggerBelow: 25}}}, rd, zerolog.Nop())
+	s.sendFn = fs.fn
+	s.tick = 20 * time.Millisecond
+	maint := true
+	s.Maintenance = func() bool { return maint }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+	time.Sleep(50 * time.Millisecond) // first tick swallowed, in band anyway
+	rd.set("s1", 10)                  // probe pulled into a dry test pot
+	time.Sleep(100 * time.Millisecond)
+	fs.mu.Lock()
+	n := len(fs.sent)
+	fs.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("pushed %d dry alerts during maintenance, want 0", n)
+	}
+	// Back in its pot and maintenance off: a real drop must still page.
+	rd.set("s1", 30)
+	time.Sleep(60 * time.Millisecond)
+	maint = false
+	rd.set("s1", 10)
+	fs.wait(t, 1)
+	if fs.sent[0].Category != CatDry || fs.sent[0].Title != "Shelf 1 dry" {
+		t.Errorf("got %+v", fs.sent[0])
+	}
+}

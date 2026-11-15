@@ -168,9 +168,10 @@ func main() {
 		log.Fatal().Err(err).Msg("web push keys")
 	}
 	notifySvc := notify.New(vapid, pushRepo, hub, zoneRepo, moistureRepo, readingRepo, log)
-	notifySvc.Start(ctx)
 	autoSvc := automation.NewService(engine, zoneRepo, cycleRepo, moistureRepo, readingRepo,
 		scheduleRepo, settingsRepo, eventLog, log, 10*time.Second)
+	notifySvc.Maintenance = autoSvc.MaintenanceActive
+	notifySvc.Start(ctx)
 	autoSvc.Start(ctx)
 
 	aggregateRepo := storage.NewAggregateRepo(db)
