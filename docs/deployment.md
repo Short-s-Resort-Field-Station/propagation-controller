@@ -89,3 +89,19 @@ Services receives nothing.
 
 Pushes need the unit's outbound HTTPS, the same path the tunnel uses.
 `startup_complete` logs `"notifications": "web_push"`.
+
+## Tunnel-only firewall
+
+`deploy/firewall/nftables.conf` accepts SSH from the LAN and nothing else
+inbound; the dashboard is reachable only through the Cloudflare tunnel and
+on the unit itself. To (re)apply:
+
+```sh
+sudo install -m 644 ~/deploy/firewall/nftables.conf /etc/nftables.conf
+sudo nft -f /etc/nftables.conf
+sudo systemctl enable nftables
+```
+
+To open the dashboard to the LAN again temporarily, add `80` back to the
+`tcp dport` set and re-run `nft -f`.
+
