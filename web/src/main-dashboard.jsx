@@ -11,6 +11,7 @@ import { getEnvSeries } from './live/series.js';
 import { api, onUnauthorized } from './live/api.js';
 import { LIGHT_OVERRIDE_MIN } from './live/useUnitState.js';
 import { LiveSignInModal, SetupModal, OperatorsModal, toDesignSession } from './live/auth-ui.jsx';
+import { usePush } from './live/push-ui.jsx';
 
 // Live Controls-tab bridge (design/controls.jsx): rack-wide schedules and
 // settings plus the per-shelf action buttons. Per-shelf settings live only
@@ -102,6 +103,7 @@ function App() {
 
   const signOut = () => { api.logout().catch(() => {}); setSession(null); };
   const canManage = !!(session && session.role === 'Steward');
+  const push = usePush(session);
   const authBridge = React.useMemo(() => ({
     SignInModal: LiveSignInModal,
     canManage,
@@ -171,6 +173,7 @@ function App() {
         onSignOut={signOut}
         auth={authBridge}
         alerts={alerts}
+        push={push}
         onAck={(id) => setAcked((a) => ({ ...a, [id]: true }))}
         onAckAll={() => setAcked((a) => {
           const n = { ...a };

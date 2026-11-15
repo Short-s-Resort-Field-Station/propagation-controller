@@ -67,10 +67,6 @@ func main() {
 	hub := bus.New()
 	eventLog := logging.NewEventLogger(log, events)
 	eventLog.AttachHub(hub)
-	// Phone push for reservoir lockouts (Austin, 2026-11-13). Configured by
-	// environment only (deploy/notify.env.example); inert when unset.
-	notifyCfg := notify.LoadFromEnv()
-	notifySvc := notify.New(notifyCfg, hub, log)
 
 	var ctrl relay.Controller
 	driverName := "numato_usb"
@@ -92,7 +88,6 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	notifySvc.Start(ctx)
 
 	mgr := devices.NewManager(ctrl, driverName, actions, deviceRepo, eventLog, cfg.Simulation)
 	mgr.AttachHub(hub)
@@ -165,6 +160,15 @@ func main() {
 	fanSvc.Start(ctx)
 
 	moistureRepo := storage.NewMoistureRuleRepo(db)
+	// Phone notifications over Web Push (Austin, 2026-11-15): VAPID keys live
+	// in the data dir; subscriptions in the DB; nothing else to configure.
+	pushRepo := storage.NewPushRepo(db)
+	vapid, err := notify.LoadOrCreateKeys(cfg.DataDir)
+	if err != nil {
+		log.Fatal().Err(err).Msg("web push keys")
+	}
+	notifySvc := notify.New(vapid, pushRepo, hub, zoneRepo, moistureRepo, readingRepo, log)
+	notifySvc.Start(ctx)
 	autoSvc := automation.NewService(engine, zoneRepo, cycleRepo, moistureRepo, readingRepo,
 		scheduleRepo, settingsRepo, eventLog, log, 10*time.Second)
 	autoSvc.Start(ctx)
@@ -228,6 +232,8 @@ func main() {
 		Zones:      zoneRepo,
 		Cycles:     cycleRepo,
 		EventLog:   eventLog,
+		Push:       notifySvc,
+		PushRepo:   pushRepo,
 		DB:         db,
 		Log:        log,
 		Simulation: cfg.Simulation,
@@ -250,7 +256,7 @@ func main() {
 	eventLog.Info("startup_complete", "propagationd started", "system", map[string]any{
 		"version":       version.Version,
 		"simulation":    cfg.Simulation,
-		"notifications": notifyCfg.Transports(),
+		"notifications": "web_push",
 	})
 
 	<-ctx.Done()

@@ -42,6 +42,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 // anonymous caller gets these events with the operator anonymised. Signed-in
 // operators and the rack console see the full record.
 var publicAccountEvents = map[string]string{
+	"push_subscribed":     "an operator enabled phone notifications",
 	"auth_setup_complete": "the steward account was created",
 	"user_created":        "an operator account was created",
 	"user_signed_in":      "an operator signed in",

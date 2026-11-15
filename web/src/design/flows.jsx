@@ -1,5 +1,6 @@
 import React from 'react';
 import { PG } from './data.jsx';
+import { PUSH_CATEGORIES } from '../live/push-ui.jsx';
 
 // pgui-flows.jsx — the "missing flows" for the Propagation Unit:
 // shelf assignment · auth (rack lock + session) · offline states ·
@@ -411,32 +412,48 @@ function AlertBar({ alerts, onOpen }){
     </div>
   );
 }
-function EscRow({ label, sub, on, tog }){
-  return (<div className="escrow"><div><div style={{fontFamily:'Newsreader',fontSize:'15px'}}>{label}</div>{sub && <div className="fx-k" style={{margin:'3px 0 0'}}>{sub}</div>}</div><div className={'toggle'+(on?' on':'')} onClick={tog}><i></i></div></div>);
+function EscRow({ label, sub, on, tog, dim=false }){
+  return (<div className="escrow" style={dim?{opacity:.45}:undefined}><div><div style={{fontFamily:'Newsreader',fontSize:'15px'}}>{label}</div>{sub && <div className="fx-k" style={{margin:'3px 0 0'}}>{sub}</div>}</div><div className={'toggle'+(on?' on':'')} onClick={dim?undefined:tog}><i></i></div></div>);
 }
-function AlertsModal({ alerts, esc, setEsc, onAck, onAckAll, onClose }){
-  const tog=k=>setEsc(e=>({...e,[k]:!e[k]}));
-  const step=(k,min,max)=>f=>setEsc(e=>({...e,[k]:Math.max(min,Math.min(max, typeof f==='function'?f(e[k]):f))}));
+// Notifications (2026-11-15): Web Push switches for this device, from the
+// live build's usePush hook. The design preview has no `push` and says so.
+function NotifyPanel({ push }){
+  if(!push) return <div className="fx-latin">Notifications are set up on the live unit.</div>;
+  if(!push.signedIn) return <div className="fx-latin">Sign in to receive notifications on this device.</div>;
+  if(!push.supported) return <div className="fx-latin">This browser cannot receive push notifications. On an iPhone, add the dashboard to the Home Screen first, then open it from there.</div>;
+  const standalone = typeof window!=='undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  const iosHint = /iPhone|iPad/.test(navigator.userAgent) && !standalone;
+  const sub = push.enabled ? 'On · arrives even with the dashboard closed'
+    : push.permission==='denied' ? 'Blocked for this site in the browser settings'
+    : iosHint ? 'On iPhone, add to Home Screen first'
+    : push.busy ? 'Asking the browser…' : 'Off';
+  return (
+    <div className="esc-box">
+      <EscRow label="Notifications on this device" sub={sub} on={push.enabled} tog={()=>{ if(push.busy) return; push.enabled ? push.disable() : push.enable(); }}/>
+      {PUSH_CATEGORIES.map(c=> <EscRow key={c.k} label={c.label} sub={c.sub} dim={!push.enabled}
+        on={!!(push.enabled && push.prefs && push.prefs[c.k])} tog={()=>push.setPref(c.k, !(push.prefs && push.prefs[c.k]))}/>)}
+      <div className="escrow" style={{justifyContent:'flex-end',gap:'10px'}}>
+        {push.error && <span className="fx-k" style={{color:'var(--oxblood)',marginRight:'auto',textTransform:'none',letterSpacing:0}}>{push.error}</span>}
+        {push.tested && !push.error && <span className="fx-k" style={{marginRight:'auto'}}>Test sent · check the phone</span>}
+        <button className="fx-btn" disabled={!push.enabled||push.busy} onClick={push.test}>Send test</button>
+      </div>
+    </div>
+  );
+}
+function AlertsModal({ alerts, push=null, onAck, onAckAll, onClose }){
   return (
     <div className="fx-back" onClick={onClose}><div className="fx-modal" style={{maxWidth:'640px'}} onClick={e=>e.stopPropagation()}>
-      <div className="fx-head"><span className="ttl">Alerts &amp; Escalation</span><span className="tag">{alerts.length} active</span><span className="x" onClick={onClose}>&times;</span></div>
+      <div className="fx-head"><span className="ttl">Alerts &amp; Notifications</span><span className="tag">{alerts.length} active</span><span className="x" onClick={onClose}>&times;</span></div>
       <div className="fx-body">
         <div className="fx-k">Active alerts</div>
         {alerts.length
           ? <div className="albar" style={{marginBottom:'20px'}}>{alerts.map(a=>(
               <div className="alrow" key={a.id}><span className="sev" style={{background:a.sev}}></span><span className="kind">{a.kind}</span><span className="msg">{a.msg}</span><button className="ackb" onClick={()=>onAck(a.id)}>Acknowledge</button></div>))}</div>
           : <div className="fx-latin" style={{marginBottom:'20px'}}>No active alerts — all clear.</div>}
-        <div className="fx-k">Escalation policy</div>
-        <div className="esc-box">
-          <EscRow label="Email the on-call steward" sub="The on-call steward" on={esc.email} tog={()=>tog('email')}/>
-          <EscRow label="SMS text alert" sub="For Action-Required only" on={esc.sms} tog={()=>tog('sms')}/>
-        </div>
-        <div className="fx-2" style={{marginTop:'16px'}}>
-          <div><div className="fx-k">Repeat until acknowledged</div><Stepper v={esc.repeatMin} set={step('repeatMin',5,60)} min={5} max={60} unit="m"/></div>
-          <div></div>
-        </div>
+        <div className="fx-k">Phone notifications · this device</div>
+        <NotifyPanel push={push}/>
       </div>
-      <div className="fx-foot"><span className="note">Sensor Fault &amp; Reservoir Low repeat until acknowledged.</span><button className="fx-btn" onClick={onClose}>Close</button><button className="fx-btn primary" onClick={onAckAll} disabled={!alerts.length}>Acknowledge all</button></div>
+      <div className="fx-foot"><span className="note">Each signed-in device keeps its own switches.</span><button className="fx-btn" onClick={onClose}>Close</button><button className="fx-btn primary" onClick={onAckAll} disabled={!alerts.length}>Acknowledge all</button></div>
     </div></div>
   );
 }

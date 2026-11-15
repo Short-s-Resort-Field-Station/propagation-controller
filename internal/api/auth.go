@@ -57,6 +57,8 @@ func mutationRole(method, path string) string {
 	switch {
 	case strings.HasPrefix(p, "/auth/"):
 		return "" // login/logout/setup manage themselves
+	case strings.HasPrefix(p, "/push/"):
+		return "" // any signed-in operator owns their own phone (handlers check)
 	case strings.HasPrefix(p, "/relays/"),
 		strings.HasPrefix(p, "/lighting/on"),
 		strings.HasPrefix(p, "/lighting/off"),

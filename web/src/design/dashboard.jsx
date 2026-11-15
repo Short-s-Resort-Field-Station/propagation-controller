@@ -345,7 +345,7 @@ function initialTab(){
 
 // `auth` (live build): { SignInModal, canManage, openOperators } — swaps the
 // demo PIN sign-in for the real one and adds operator management for admins.
-function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, onEmergencyStop, onSafetyReset, signInRequest=0 }){
+function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, onEmergencyStop, onSafetyReset, signInRequest=0, push=null }){
   const [tab, setTab] = React.useState(initialTab);
   const [assignFor, setAssignFor] = React.useState(null);
   const [showSignIn, setShowSignIn] = React.useState(false);
@@ -356,7 +356,6 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
   const [showAlerts, setShowAlerts] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
   const [showMaint, setShowMaint] = React.useState(false); // change 2: confirm dialog
-  const [esc, setEsc] = React.useState(PG.ESCALATION_DEFAULT);
   const rs = PG.RACK_STATUS[rackStatus] || PG.RACK_STATUS.Operational;
 
   // fallbacks so the component also works standalone (e.g. the handoff figure)
@@ -468,7 +467,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         ? <auth.SignInModal onClose={()=>setShowSignIn(false)} onSignIn={(op)=>{ signInFn(op); setShowSignIn(false); }}/>
         : <SignInModal onClose={()=>setShowSignIn(false)} onSignIn={(op)=>{ signInFn(op); setShowSignIn(false); }}/>)}
       {showSignOut && <Confirm title="Sign out" body={`Sign out ${ses?ses.name:''}? Unsaved control changes are discarded.`} confirmLabel="Sign out" danger onCancel={()=>setShowSignOut(false)} onConfirm={()=>{ signOutFn(); setShowSignOut(false); }}/>}
-      {showAlerts && <AlertsModal alerts={alerts} esc={esc} setEsc={setEsc} onAck={ackFn} onAckAll={ackAllFn} onClose={()=>setShowAlerts(false)}/>}
+      {showAlerts && <AlertsModal alerts={alerts} push={push} onAck={ackFn} onAckAll={ackAllFn} onClose={()=>setShowAlerts(false)}/>}
       {showHistory && <HistoryModal onClose={()=>setShowHistory(false)}/>}
     </div>
   );

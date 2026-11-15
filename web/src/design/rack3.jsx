@@ -63,11 +63,16 @@ function DialG({ value, lo, hi, active = true, hasBand = true, size = 92, unit =
   const pol = (deg, rr) => [cx + rr * Math.cos(deg * Math.PI / 180), cy + rr * Math.sin(deg * Math.PI / 180)];
   const arc = (d0, d1, rr) => { const [x0, y0] = pol(d0, rr), [x1, y1] = pol(d1, rr); return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${rr.toFixed(1)} ${rr.toFixed(1)} 0 ${(d1 - d0) > 180 ? 1 : 0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
   const v = Math.max(0, Math.min(100, Number(value) || 0));
-  const out = active && hasBand && (v < lo || v > hi);
-  const FI = out ? 'var(--ochre-l)' : 'var(--sink)';
-  const FL = out ? 'var(--ochre-l)' : 'var(--sline)';
-  const FS = out ? 'var(--ochre-l)' : 'var(--sline-soft)';
-  const FD = out ? 'var(--ochre-l)' : 'var(--sdim)';
+  // Austin, 2026-11-15: ochre means dry (below the band); too wet gets its
+  // own colour — river, the water colour — so the two faults never read alike.
+  const dry = active && hasBand && v < lo;
+  const wet = active && hasBand && v > hi;
+  const out = dry || wet;
+  const acc = dry ? 'var(--ochre-l)' : 'var(--river-l)';
+  const FI = out ? acc : 'var(--sink)';
+  const FL = out ? acc : 'var(--sline)';
+  const FS = out ? acc : 'var(--sline-soft)';
+  const FD = out ? acc : 'var(--sdim)';
   const ticks = [];
   for (let i = 0; i <= 20; i++) {
     const deg = start + sweep * (i / 20), major = i % 5 === 0;

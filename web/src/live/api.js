@@ -80,6 +80,12 @@ export const api = {
   deleteProfile: (id) => req(`/species-profiles/${id}`, { method: 'DELETE' }),
   cycles: (limit = 50) => req(`/irrigation/cycles?limit=${limit}`),
   moistureControl: (zoneKey) => req(`/irrigation/zones/${zoneKey}/moisture-control`),
+  // Web Push (2026-11-15): this browser's subscription and its switches.
+  pushVapid: () => req('/push/vapid'),
+  pushLookup: (endpoint) => post('/push/subscriptions/lookup', { endpoint }),
+  pushUpsert: (body) => req('/push/subscriptions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  pushDelete: (endpoint) => req('/push/subscriptions', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) }),
+  pushTest: (endpoint) => post('/push/subscriptions/test', { endpoint }),
   readings: (sensorKey, limit = 500) => req(`/sensors/${sensorKey}/readings?limit=${limit}`),
   // Timeline series (2026-11-11): interval "hour" = stored hourly aggregates
   // (limit covers a season), or a bucket width like "5m" for the 24-hour view.

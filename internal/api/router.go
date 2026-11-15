@@ -16,6 +16,7 @@ import (
 	"propagation-controller/internal/irrigation"
 	"propagation-controller/internal/lighting"
 	"propagation-controller/internal/logging"
+	"propagation-controller/internal/notify"
 	"propagation-controller/internal/safety"
 	"propagation-controller/internal/storage"
 )
@@ -42,6 +43,8 @@ type Server struct {
 	cycles       *storage.CycleRepo
 	profiles     *storage.SpeciesProfileRepo
 	eventLog     *logging.EventLogger
+	push         *notify.Service
+	pushRepo     *storage.PushRepo
 	db           *sql.DB
 	log          zerolog.Logger
 	startedAt    time.Time
@@ -71,6 +74,8 @@ type Deps struct {
 	Zones      *storage.ZoneRepo
 	Cycles     *storage.CycleRepo
 	EventLog   *logging.EventLogger
+	Push       *notify.Service
+	PushRepo   *storage.PushRepo
 	DB         *sql.DB
 	Log        zerolog.Logger
 	Simulation bool
@@ -101,6 +106,8 @@ func NewRouter(d Deps) http.Handler {
 		// no new Deps wiring needed at the cmd layer.
 		profiles:   storage.NewSpeciesProfileRepo(d.DB),
 		eventLog:   d.EventLog,
+		push:       d.Push,
+		pushRepo:   d.PushRepo,
 		db:         d.DB,
 		log:        d.Log,
 		startedAt:  time.Now(),
@@ -118,6 +125,12 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/auth/setup", s.handleAuthSetup)
 		r.Post("/auth/login", s.handleAuthLogin)
 		r.Post("/auth/logout", s.handleAuthLogout)
+		// Web Push (2026-11-15): phone notifications for signed-in operators.
+		r.Get("/push/vapid", s.handlePushVAPID)
+		r.Post("/push/subscriptions/lookup", s.handlePushLookup)
+		r.Put("/push/subscriptions", s.handlePushUpsert)
+		r.Delete("/push/subscriptions", s.handlePushDelete)
+		r.Post("/push/subscriptions/test", s.handlePushTest)
 		r.Get("/users", s.handleListUsers)
 		r.Post("/users", s.handleCreateUser)
 		r.Patch("/users/{username}", s.handleUpdateUser)

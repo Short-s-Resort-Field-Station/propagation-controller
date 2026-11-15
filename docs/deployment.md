@@ -71,36 +71,21 @@ scp -rp deploy piconium:
 ssh -t piconium 'chmod +x deploy/install.sh && cd deploy && sudo ./install.sh ../propagationd-linux-amd64 ../propagation-watchdog-linux-amd64'
 ```
 
-The installer seeds `/etc/propagation-controller/notify.env` from
-`deploy/notify.env.example` the first time only and never overwrites it.
+## Phone notifications (Web Push)
 
-## Phone notifications (reservoir lockouts)
+The dashboard is an installable PWA and `propagationd` pushes to it directly
+over Web Push: no third-party app, no account, nothing to configure on the
+unit. On first start the daemon writes a VAPID key pair to
+`<data-dir>/vapid.json` (0600); each browser that opts in is a row in
+`push_subscriptions` with its own switches.
 
-`propagationd` pushes "Reservoir empty" / "Reservoir sensor offline" and the
-matching all-clear to the transports named in `notify.env`; nothing else is
-sent. Both are optional and independent.
+To enable on a phone: sign in at shortsfieldstation.org/propagate, open
+**Alerts**, switch on **Notifications on this device**, allow the browser
+prompt, then pick the categories: Watering, Shelf below its band, Reservoir,
+Sensors & faults (off by default). **Send test** proves the path. On an
+iPhone the dashboard must be added to the Home Screen first and opened from
+there. Android pushes ride Google's push service, so a phone without Play
+Services receives nothing.
 
-- **ntfy push** (no account): install the ntfy app, then on the Piconium
-
-  ```sh
-  sudo sh -c 'sed -i "s/^PROPAGATION_NTFY_TOPIC=.*/PROPAGATION_NTFY_TOPIC=pu01-$(openssl rand -hex 8)/" /etc/propagation-controller/notify.env'
-  sudo grep NTFY_TOPIC /etc/propagation-controller/notify.env   # subscribe to this topic in the app
-  sudo systemctl restart propagationd
-  ```
-
-  Treat the topic like a password: anyone who knows it can read the pushes.
-- **Twilio SMS**: fill the four `PROPAGATION_TWILIO_*` lines with your own
-  account's SID, auth token, sending number and your mobile (E.164, `+1...`),
-  then restart. US long codes need A2P 10DLC registration before carriers
-  deliver; a trial account texts only its verified numbers.
-
-To test either one without emptying the tank, raise the cutoff above the
-current level and put it back:
-
-```sh
-curl -s localhost/api/v1/settings | jq .settings.safety      # note the current block
-# PUT the same block with "min_reservoir_level": 90, wait 5 s, PUT it back to 20
-```
-
-Startup logs the enabled transports as `"notifications": [...]` in the
-`startup_complete` event (never the credentials).
+Pushes need the unit's outbound HTTPS, the same path the tunnel uses.
+`startup_complete` logs `"notifications": "web_push"`.
