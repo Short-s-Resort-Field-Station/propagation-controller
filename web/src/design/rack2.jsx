@@ -164,6 +164,14 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
   // for Purge (the shelf's purge_seconds) / Drain (full drain-back) / Cancel,
   // so a hand purge costs no extra permanent control.
   const [chooseDrain, setChooseDrain] = React.useState(false);
+  // Service popup (Austin, 2026-11-15): Disable Shelf and Maintenance used to
+  // sit as two plaques under the water row and fell off the 480-px panel once
+  // the drain chooser opened. Now they live behind an easter egg like the
+  // power-down: press and hold the soil-moisture dial for 3 s.
+  const [service, setService] = React.useState(false);
+  const svcRef = React.useRef(null);
+  const svcStart = ()=>{ if(svcRef.current) return; svcRef.current = setTimeout(()=>{ svcRef.current = null; setService(true); }, 3000); };
+  const svcEnd = ()=>{ if(svcRef.current){ clearTimeout(svcRef.current); svcRef.current = null; } };
   React.useEffect(()=>{ if(busy||offline||disabled||pending) setChooseDrain(false); }, [busy, offline, pending]);
   const purgeSec = s.raw && s.raw.purgeSec ? s.raw.purgeSec : 0;
   const drainMin = s.raw && s.raw.drainMin ? s.raw.drainMin : 0;
@@ -201,7 +209,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
         {/* claude-design refined 3-dial detail (marker + centered readout),
             wired to the live moisture / temp / EC bands. no-probe → dimmed dash. */}
         <div className="rk2-dial3">
-          <div className="rk2-dcell">
+          <div className="rk2-dcell rk2-hold" onPointerDown={svcStart} onPointerUp={svcEnd} onPointerLeave={svcEnd} onPointerCancel={svcEnd} onContextMenu={e=>e.preventDefault()}>
             <div className="k">Soil Moisture</div>
             <div className="rk2-dwrap">
               <DialGauge value={s.moisture} lo={s.hasRule===false?0:s.lo} hi={s.hasRule===false?0:s.hi} accent={col} size={90} marker active={s.probe} bg={dbg}/>
@@ -268,7 +276,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
           ) : watering ? (
             <div className="rk2-pump"><div className="tk"></div><span className="lbl">{cycleLabel(s.cycle, 'Cycle accepted · starting')}</span></div>
           ) : disabled ? (
-            <div className="rk2-plaque" style={{justifyContent:'center',width:'100%',color:'var(--sfaint)'}}>Shelf disabled — enable to water</div>
+            <div className="rk2-plaque" style={{justifyContent:'center',width:'100%',color:'var(--sfaint)'}}>Shelf disabled — hold the moisture dial to enable</div>
           ) : chooseDrain ? (
             <div className="rk2-wrow choose">
               <button className="rk2-wbtn rk2-dbtn" disabled={pending || !purgeSec} onClick={()=>{ setChooseDrain(false); if(onPurge) onPurge(); }}
@@ -287,19 +295,32 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
             </div>
           )}
 
-          {/* change 2: per-shelf disable toggle + system maintenance toggle */}
-          <div className="rk2-actions">
-            <button className="rk2-plaque" style={{justifyContent:'center'}} disabled={offline}
-              onClick={guard(()=>onSetEnabled && onSetEnabled(s.n, disabled))}>
-              {disabled ? 'Enable Shelf' : 'Disable Shelf'}
-            </button>
-            <button className="rk2-plaque" style={{justifyContent:'center',...(maintenance?{color:'var(--ochre-l)',borderColor:'var(--ochre-l)'}:{})}} disabled={offline}
-              onClick={guard(()=>onSetMaintenance && onSetMaintenance(!maintenance))}>
-              {maintenance ? 'Exit Maintenance' : 'Maintenance'}
-            </button>
-          </div>
         </div>
       </div>
+      {service && (
+        <div className="rk2-confirm-back" onClick={()=>setService(false)}
+          style={{position:'absolute',inset:0,zIndex:30,background:'rgba(11,9,7,0.8)',backdropFilter:'blur(2px)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:'#1B1812',border:'1.5px solid var(--ochre-l)',borderRadius:10,padding:'22px 24px',maxWidth:460,textAlign:'center',color:'var(--lcd)'}}>
+            <div style={{fontFamily:'"Zilla Slab",serif',fontWeight:900,fontSize:18,marginBottom:8,color:'var(--ochre-l)'}}>Shelf {s.n} · Service</div>
+            <div style={{fontFamily:'"Newsreader",serif',fontSize:15,lineHeight:1.5,marginBottom:18}}>
+              {disabled ? 'This shelf is out of automation.' : 'Take this shelf out of automation,'}{' '}
+              {maintenance ? 'The rack is in maintenance mode.' : 'or put the whole rack into maintenance.'}
+            </div>
+            <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+              <button className="rk2-plaque" style={{justifyContent:'center'}} onClick={()=>setService(false)}>Cancel</button>
+              <button className="rk2-plaque" style={{justifyContent:'center'}} disabled={offline}
+                onClick={guard(()=>{ setService(false); onSetEnabled && onSetEnabled(s.n, disabled); })}>
+                {disabled ? 'Enable Shelf' : 'Disable Shelf'}
+              </button>
+              <button className="rk2-plaque" style={{justifyContent:'center',...(maintenance?{color:'var(--ochre-l)',borderColor:'var(--ochre-l)'}:{})}} disabled={offline}
+                onClick={guard(()=>{ setService(false); onSetMaintenance && onSetMaintenance(!maintenance); })}>
+                {maintenance ? 'Exit Maintenance' : 'Maintenance'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* change 2: confirm a hand-water while maintenance mode is on. */}
       {confirmWater && (
         <div className="rk2-confirm-back" onClick={()=>setConfirmWater(false)}
