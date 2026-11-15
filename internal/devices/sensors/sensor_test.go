@@ -137,3 +137,26 @@ func TestConfigValidate(t *testing.T) {
 		}
 	}
 }
+
+// Austin's Deepot weigh-and-wet run, 2026-11-15: the probe over-reads the
+// dry end of a bark mix and converges near container capacity.
+func TestApplyCurve(t *testing.T) {
+	curve := [][2]float64{{5, 0}, {20.7, 7.9}, {27.6, 14.3}, {32.7, 19.8}, {36, 28}}
+	cases := []struct{ in, want float64 }{
+		{5, 0}, {20.7, 7.9}, {27.6, 14.3}, {36, 28},
+		{24.15, 11.1}, // midway between two points
+		{0, 0},        // air: extended below the first point but never negative
+		{46, 52.8},    // above the last point, extended along the last segment
+	}
+	for _, c := range cases {
+		if got := ApplyCurve(c.in, curve); got < c.want-0.15 || got > c.want+0.15 {
+			t.Errorf("ApplyCurve(%v) = %.2f, want %.2f", c.in, got, c.want)
+		}
+	}
+	if got := ApplyCurve(31.4, nil); got != 31.4 {
+		t.Errorf("no curve must pass through, got %v", got)
+	}
+	if got := ApplyCurve(31.4, [][2]float64{{1, 1}}); got != 31.4 {
+		t.Errorf("one point is not a curve, got %v", got)
+	}
+}

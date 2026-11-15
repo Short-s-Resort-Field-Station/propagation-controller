@@ -88,3 +88,28 @@ the pair gives you a conversion curve better than the factory's.
 Second Modbus device, address 2, register 0 = level uint16 ×10 → % of water
 column. Not yet verified against real hardware — treat its map as provisional
 until bring-up.
+
+## Substrate calibration (2026-11-15)
+
+Austin's weigh-and-wet run: a 2-inch Deepot (550 ml of the shelf 1/2
+bark-and-peat mix, 254.9 g air-dry) with the shelf 2 probe centred as on the
+shelf, water poured from the top in steps, the pot weighed at each step so the
+true volumetric water content is water mass ÷ 550 ml. The probe over-reads
+the dry end and converges near container capacity (~29 % by volume, 159 g):
+
+| probe reads | true %VWC |
+|---|---|
+| 5 | 0 |
+| 20.7 | 7.9 |
+| 27.6 | 14.3 |
+| 32.7 | 19.8 |
+| 36 | 28 (steps at 24.9 and 29.6 both read ~36; the plateau) |
+
+Applied as `curve` on the moisture register of `soil_zone_1` and
+`soil_zone_2` (same mix, probes agree within 3 points in the same pot), and
+the two shelves' rules were re-expressed through the same curve so the
+watering behaviour did not move. Shelf 3 (mountain-laurel grit) is NOT
+calibrated: it needs its own run. Caveats: top-pour in a tube puts early
+water at the tines, so the dry-end gap is partly geometry; on the shelf the
+water comes from below. Readings stored before the switch are on the old
+scale. Raw points: scratchpad `calibration-points.csv` (session 2026-11-15).

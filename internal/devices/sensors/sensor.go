@@ -27,6 +27,44 @@ type RegisterSpec struct {
 	// the sensor is pinned at its range ceiling and the true value is higher
 	// (e.g. the ZTS-3000 EC channel tops out at exactly 20000 µS/cm).
 	ClipAt *float64 `json:"clip_at,omitempty"`
+	// Curve is a substrate calibration (2026-11-15, Austin's weigh-and-wet
+	// run in a Deepot): pairs of [reading after scale/offset, true value],
+	// ascending by reading. Piecewise linear between points, extended along
+	// the end segments, never below zero. Empty = factory curve as read.
+	Curve [][2]float64 `json:"curve,omitempty"`
+}
+
+// ApplyCurve maps a scaled reading through a calibration curve. Fewer than
+// two points means no calibration.
+func ApplyCurve(v float64, curve [][2]float64) float64 {
+	if len(curve) < 2 {
+		return v
+	}
+	seg := func(a, b [2]float64) float64 {
+		if b[0] == a[0] {
+			return a[1]
+		}
+		return a[1] + (v-a[0])*(b[1]-a[1])/(b[0]-a[0])
+	}
+	var out float64
+	switch {
+	case v <= curve[0][0]:
+		out = seg(curve[0], curve[1])
+	case v >= curve[len(curve)-1][0]:
+		out = seg(curve[len(curve)-2], curve[len(curve)-1])
+	default:
+		out = v
+		for i := 1; i < len(curve); i++ {
+			if v <= curve[i][0] {
+				out = seg(curve[i-1], curve[i])
+				break
+			}
+		}
+	}
+	if out < 0 {
+		out = 0
+	}
+	return out
 }
 
 // Config is the device config_json payload for a generic_modbus sensor.
@@ -94,7 +132,7 @@ func ReadAll(ctx context.Context, bus modbus.Bus, deviceKey string, cfg Config) 
 		if key == "" {
 			key = deviceKey + "_" + reg.Name
 		}
-		value := raw*scale + reg.Offset
+		value := ApplyCurve(raw*scale+reg.Offset, reg.Curve)
 		quality := "good"
 		if reg.ClipAt != nil && value >= *reg.ClipAt {
 			quality = "clipped"
