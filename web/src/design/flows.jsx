@@ -259,7 +259,7 @@ function AssignModal({ shelfN, onAssign, onClose, initial, onClear, onDisable, p
         <div className="asg-grid3">
           <div className="fx-field" style={{marginBottom:0}}>
             <div className="fx-k">Moisture band · %VWC</div>
-            <RangeField lo={lo} hi={hi} setLo={setLo} setHi={setHi} min={0} max={100} unit="%VWC" ok={bandOk}/>
+            <RangeField lo={lo} hi={hi} setLo={setLo} setHi={setHi} min={1} max={100} unit="%VWC" ok={bandOk}/>
           </div>
           <div className="fx-field" style={{marginBottom:0}}>
             <div className="fx-k">Soak</div>

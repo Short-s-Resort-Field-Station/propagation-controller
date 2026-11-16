@@ -101,7 +101,7 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, loc
 function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
   const meta = PG.STATUS[s.status] || PG.STATUS.Inactive;
   const inBand = s.moisture>=s.lo && s.moisture<=s.hi;
-  const readonly = !role || role==='Viewer';
+  const readonly = !role || role!=='Steward'; // shelf settings are admin-only server-side
   return (
     <div className={'scard'+(s.active?'':' inactive')}>
       <div className="stripe" style={{background:s.stripe}}></div>
@@ -370,7 +370,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
   const effShelves = onAssign ? shelves : shelves.map(s=> locAssign[s.n] ? {...s, ...locAssign[s.n], active:true} : s);
   const role = ses ? ses.role : null;
 
-  const canToggleMaint = role && role!=='Viewer' && onSetMaintenance;
+  const canToggleMaint = role==='Steward' && onSetMaintenance; // PUT /settings is admin-only
   const canStop = role && role!=='Viewer' && (onEmergencyStop || onSafetyReset);
   return (
     <div className="db">

@@ -92,7 +92,11 @@ func (s *Server) handlePushUpsert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	existing, _ := s.pushRepo.GetByEndpoint(b.Endpoint)
+	existing, err := s.pushRepo.GetByEndpoint(b.Endpoint)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if existing != nil && existing.Username != u.Username {
 		writeError(w, http.StatusForbidden, "this browser is subscribed under another operator")
 		return

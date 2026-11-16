@@ -60,11 +60,13 @@ function useForm(initial){
   const [saved, setSaved] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState('');
-  const load = (next) => { setV(next); setDirty(false); setSaved(false); setErr(''); };
-  const set = (k, x) => { setV(p=>({...p,[k]:x})); setDirty(true); setSaved(false); };
+  // 2026-11-15 review: a reload must never clobber an edit in progress.
+  const dirtyRef = React.useRef(false);
+  const load = (next) => { if (dirtyRef.current) return; setV(next); setDirty(false); setSaved(false); setErr(''); };
+  const set = (k, x) => { setV(p=>({...p,[k]:x})); dirtyRef.current = true; setDirty(true); setSaved(false); };
   const save = async (fn) => {
     setSaving(true); setErr('');
-    try { await fn(v); setDirty(false); setSaved(true); }
+    try { await fn(v); dirtyRef.current = false; setDirty(false); setSaved(true); }
     catch(e){ setErr((e && e.message) || 'save failed'); }
     finally { setSaving(false); }
   };
@@ -232,15 +234,18 @@ function ControlsTab({ role, controls }){
   const shelfList = c.list || [];
 
   // Rack-wide values load once (and again after a save), never while editing.
+  // 2026-11-15 review: `c` is rebuilt on every refresh; read it through a ref
+  // so the rack values load once and after saves, not every few seconds.
+  const cRef = React.useRef(c); cRef.current = c;
   const loadRack = React.useCallback(()=>{
-    c.loadRack().then(r=>{
+    cRef.current.loadRack().then(r=>{
       if(!r) return;
       if(r.lights) lights.load({ enabled: r.lights.enabled !== false, on: r.lights.on || '', off: r.lights.off || '' });
       if(r.fans) fans.load({ enabled: r.fans.enabled !== false, on: r.fans.on || '', off: r.fans.off || '' });
       auto.load({ start: r.window ? r.window.start : '', end: r.window ? r.window.end : '', minReservoir: r.minReservoir != null ? r.minReservoir : 20 });
     }).catch(()=>{});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c]);
+  }, []);
   React.useEffect(()=>{ loadRack(); }, [loadRack]);
 
   const saveSched = (which) => (form) => form.save(v => c.applyRack({ [which]: { enabled: v.enabled, on: v.on, off: v.off } }));

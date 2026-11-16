@@ -353,14 +353,21 @@ func (s *Service) dryTick(ctx context.Context) {
 	s.mu.Lock()
 	first := !s.dryInit
 	s.dryInit = true
+	if !first && s.Maintenance != nil && s.Maintenance() {
+		s.mu.Unlock()
+		return // probes may be out of their pots; flags stay as they were
+	}
 	crossed := DryTransitions(s.dryFlag, rules, latest, time.Now())
 	s.mu.Unlock()
-	if first || (s.Maintenance != nil && s.Maintenance()) {
-		return // startup state is not news; maintenance means probes may be out
+	if first {
+		return // the first tick only records where each shelf stands
 	}
 	for _, r := range crossed {
 		n, species := s.shelf(r.ZoneKey)
 		rd := latest(r.SensorKey)
+		if rd == nil {
+			continue // the reading vanished between ticks (DB busy); next tick
+		}
 		body := fmt.Sprintf("%.0f %%VWC, band starts at %.0f %%", rd.Value, r.TriggerBelow)
 		if species != "" {
 			body = species + " · " + body
@@ -419,6 +426,9 @@ func (s *Service) SendTo(ctx context.Context, sub storage.PushSubscription, msg 
 }
 
 func (s *Service) send(ctx context.Context, sub storage.PushSubscription, payload []byte, urgent bool) bool {
+	// One slow push service must not hold the rest of the devices hostage.
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	code, err := s.sendFn(ctx, sub, payload, urgent)
 	switch {
 	case err == nil && code >= 200 && code < 300:

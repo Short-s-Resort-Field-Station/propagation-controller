@@ -76,6 +76,13 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
+	for _, reg := range c.Registers {
+		for i := 1; i < len(reg.Curve); i++ {
+			if !(reg.Curve[i][0] > reg.Curve[i-1][0]) {
+				return fmt.Errorf("register %s: curve readings must be strictly ascending", reg.Name)
+			}
+		}
+	}
 	if c.ModbusAddress < 1 || c.ModbusAddress > 247 {
 		return fmt.Errorf("modbus_address must be 1..247")
 	}

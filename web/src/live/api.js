@@ -35,7 +35,7 @@ async function req(path, opts) {
     res = await fetch(BASE + path, withTimeout(opts));
   } catch (e) {
     // AbortError (timeout) and network failures surface as one plain message.
-    throw new Error(e && e.name === 'TimeoutError' ? 'controller not responding' : (e && e.message) || 'network error');
+    throw new Error(e && e.name === 'TimeoutError' ? 'no reply from the controller — check the status before retrying' : (e && e.message) || 'network error');
   }
   if (!res.ok) {
     let msg = res.statusText;

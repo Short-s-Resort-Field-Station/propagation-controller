@@ -66,6 +66,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
   });
   const rulesRef = React.useRef({});
   const tickRef = React.useRef(0);
+  const rulesDirtyRef = React.useRef(false);
   // Audit 3.5: one refresh at a time, and an older response never overwrites
   // a newer one.
   const inflightRef = React.useRef(false);
@@ -96,13 +97,13 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
         await Promise.all([
           api.health(), api.zones(), api.sensors(), api.lighting(),
           api.relays(), api.events(10), api.safety(),
-          api.settings().catch(() => ({ settings: {} })),
+          api.settings(), // 2026-11-15 review: a failed read must not render as 'automation off'
           api.fans().catch(() => null),
         ]);
       const maintenance = buildMaintenance(settingsResp);
       const automation = buildAutomation(settingsResp);
 
-      if (tickRef.current % RULES_EVERY === 0) {
+      if (rulesDirtyRef.current || tickRef.current % RULES_EVERY === 0) {
         const rules = {};
         await Promise.all((zonesResp.zones || []).map(async (z) => {
           try {
@@ -111,6 +112,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
           } catch { /* no rule configured */ }
         }));
         rulesRef.current = rules;
+        rulesDirtyRef.current = false;
       }
       tickRef.current++;
       if (seq !== seqRef.current) return; // a newer refresh already landed
@@ -309,7 +311,7 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
             toast(`Moisture rule: ${e.message}`);
           });
           // Rules are cached; force them to reload with the next refresh.
-          tickRef.current = 0;
+          rulesDirtyRef.current = true; // survives an in-flight refresh returning early
           await refresh();
           return true;
         } catch (e) {

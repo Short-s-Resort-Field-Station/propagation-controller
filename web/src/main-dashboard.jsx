@@ -21,6 +21,8 @@ function makeControls(state, actions) {
     n: s.n, zoneKey: s.zoneKey, species: s.species, latin: s.latin, active: s.active, assigned: s.assigned,
     status: s.status, cycle: s.cycle, moisture: s.moisture, probe: s.probe,
     durMin: (s.raw && s.raw.durMin) || 0, drainMin: (s.raw && s.raw.drainMin) || 0,
+    // 2026-11-15 review: the Controls rows read these for Purge and Cancel.
+    queued: s.queued || null, raw: s.raw || null,
   }));
   const sched = (sch) => (sch ? { enabled: !!sch.enabled, on: sch.on_time, off: sch.off_time, timezone: sch.timezone, days: sch.days } : null);
 
@@ -55,15 +57,19 @@ function makeControls(state, actions) {
       if (lights) await put(api.lightingSchedule, api.putLightingSchedule, lights);
       if (fans) await put(api.fansSchedule, api.putFansSchedule, fans);
       if (window !== undefined || minReservoir !== undefined) {
-        const settings = await api.settings().catch(() => ({ settings: {} }));
+        // 2026-11-15 review: never default the current settings — a failed
+        // read used to PUT automation.enabled=false and report "Saved".
+        const settings = await api.settings();
         const body = {};
         if (window !== undefined) {
-          const auto = (settings.settings || {}).automation || {};
+          const auto = (settings.settings || {}).automation;
+          if (!auto) throw new Error('current automation settings unavailable; nothing saved');
           body.automation = { enabled: !!auto.enabled, watering_window: window };
         }
         if (minReservoir !== undefined) {
           const safety = (settings.settings || {}).safety;
-          if (safety) body.safety = { ...safety, min_reservoir_level: minReservoir };
+          if (!safety) throw new Error('current safety settings unavailable; nothing saved');
+          body.safety = { ...safety, min_reservoir_level: minReservoir };
         }
         await api.putSettings(body);
       }
@@ -118,9 +124,16 @@ function App() {
       : [])
     .filter((a) => !acked[a.id]);
 
+  // 2026-11-15 review: key on what the charts depend on, not on the shelves
+  // array identity (new every refresh) — otherwise each refresh restarted the
+  // series chain and on a slow link the Environmental tab never rendered.
+  const shelvesRef = React.useRef(state.shelves);
+  shelvesRef.current = state.shelves;
+  const seriesKey = state.shelves.map((s) => `${s.zoneKey}:${s.sensorKey}:${s.active ? 1 : 0}:${s.lo}-${s.hi}`).join('|');
   const getSeries = React.useCallback(
-    (period) => getEnvSeries(period, state.shelves),
-    [state.shelves],
+    (period) => getEnvSeries(period, shelvesRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [seriesKey],
   );
   const controls = React.useMemo(
     () => makeControls(state, actions),
