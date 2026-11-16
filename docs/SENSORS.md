@@ -115,11 +115,13 @@ describe the state the shelf actually lives in (hours after a soak):
     true ≈ (reading − 5) × 1.11      i.e. the factory curve is nearly right,
                                       ~3–5 points high in this mix
 
-Applied as `curve: [[5,0],[30.6,28.5]]` on the moisture register of
-`soil_zone_1` and `soil_zone_2` (same mix; the probes agree within 3 points in
-one pot), and their rules re-expressed through it so behaviour did not move
-(z1 16/24 → 12.2/21.2, z2 22/26 → 18.9/23.4). Container capacity ≈ 28–29 %
-by volume. Shelf 3 (mountain-laurel grit) is NOT calibrated. Readings stored
+Applied as `curve: [[5,0],[30.6,28.5]]` on the moisture register of all three
+probes (they agree within 3 points in one pot; Austin wanted one scale across
+the rack rather than a factory-scale shelf 3), and the rules re-expressed
+through it so behaviour did not move (z1 16/24 → 12.2/21.2, z2 22/26 →
+18.9/23.4, z3 10/18 → 5.6/14.5). Container capacity ≈ 28–29 % by volume in
+the shelf 1/2 mix; shelf 3's grit will differ and deserves its own weighed
+points when a pot is free. Readings stored
 before the switch are on the factory scale. To refine: weigh a bare Deepot of
 mix lifted off the tray an hour or more after a real soak and read its probe;
 each such pair is an equilibrated point. Raw log: session scratchpad
