@@ -773,7 +773,7 @@
   .photo-track .lit{position:absolute;top:0;bottom:0;background:linear-gradient(180deg,#C99A4533,#C99A4522);border-left:2px solid var(--ochre);border-right:2px solid var(--ochre)}
   .photo-track .sun{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--ochre);transform:translate(-50%,-50%);box-shadow:0 0 0 3px #C99A4533}
   .photo-scale{display:flex;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:8.5px;letter-spacing:0.1em;color:#1B181399;margin-top:5px}
-  .toggle{width:42px;height:23px;border:1px solid var(--ink);border-radius:20px;background:var(--bone);position:relative;transition:.15s}
+  .toggle{flex:none;width:42px;height:23px;border:1px solid var(--ink);border-radius:20px;background:var(--bone);position:relative;transition:.15s}
   .toggle i{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--ink);transition:.15s}
   .toggle.on{background:var(--sage)}
   .toggle.on i{left:21px}
@@ -788,7 +788,8 @@
   }
 
   /* ============ FLOWS (assignment · auth · alerts · history · confirm) ============ */
-  .fx-back{position:fixed;inset:0;z-index:120;background:#1B1813C4;display:flex;align-items:flex-start;justify-content:center;padding:44px 20px;overflow-y:auto;animation:fxFade .16s ease}
+  .fx-back{position:fixed;inset:0;z-index:120;background:#1B1813C4;display:flex;align-items:flex-start;justify-content:center;padding:44px 20px;overflow-y:auto;overscroll-behavior:contain;animation:fxFade .16s ease}
+  body:has(.fx-back){overflow:hidden} /* 2026-11-15 audit: a modal must not scroll the page behind it */
   @keyframes fxFade{from{opacity:0}to{opacity:1}}
   .fx-modal{width:100%;background:var(--paper);border:2px solid var(--ink);box-shadow:0 40px 90px -30px #000000cc;animation:fxRise .2s ease}
   @keyframes fxRise{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
@@ -961,4 +962,24 @@
     .fx-body{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
     input,select,textarea{font-size:16px !important}
     .tc-tip{font-size:10px;min-width:140px}
+    /* 2026-11-15 layout audit: every non-wrapping row that lost a control at 390px */
+    .fx-foot{flex-wrap:wrap;gap:10px}
+    .fx-foot .note{flex:1 0 100%;order:-1}
+    .fx-foot .fx-btn{flex:1 1 auto}
+    .fx-foot .fx-btn.primary{flex:1 0 100%}
+    .fx-head .x{width:44px;height:44px}
+    .hs-row{grid-template-columns:1fr;gap:2px 0;align-items:start}
+    .hs-row > :last-child{font-size:10px;opacity:.8}
+    .toggle{flex:none}
+    .escrow{gap:12px}
+    .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .stat-cell .mini,.stat-cell .n{white-space:normal}
+    .op-row{flex-wrap:wrap}
+    .op-row .fx-btn,.op-row .fx-select{flex:1 1 auto}
+    .op-add{grid-template-columns:1fr 1fr !important}
+    .alrow{flex-wrap:wrap}
+    .alrow .kind{min-width:0}
+    .alrow .ackb{flex:1 0 100%}
   }
+  /* 2026-11-15 audit: keyboard reachability for the chips, switches and closers */
+  [role=button]:focus-visible,.toggle:focus-visible,.fx-head .x:focus-visible{outline:2px solid var(--river-deep,#4C7F85);outline-offset:2px}

@@ -136,7 +136,7 @@ export function OperatorsModal({ onClose, selfName }) {
         </div>
         <div className="fx-body">
           {users && users.map((u) => (
-            <div key={u.username} style={{
+            <div key={u.username} className="op-row" style={{
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 2px', borderBottom: '1px solid var(--rule-soft)',
               opacity: u.enabled ? 1 : 0.5,
@@ -164,7 +164,7 @@ export function OperatorsModal({ onClose, selfName }) {
           ))}
 
           <div className="fx-k" style={{ margin: '20px 0 8px' }}>Add operator</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 10, alignItems: 'end' }}>
+          <div className="op-add" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 10, alignItems: 'end' }}>
             <input style={inputStyle} placeholder="Name" value={nu.username}
               onChange={(e) => setNu({ ...nu, username: e.target.value })} />
             <input style={inputStyle} type="password" placeholder="Password (8+)" value={nu.password}

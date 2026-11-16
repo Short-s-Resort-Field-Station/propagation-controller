@@ -356,6 +356,15 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
   const [showAlerts, setShowAlerts] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
   const [showMaint, setShowMaint] = React.useState(false); // change 2: confirm dialog
+  // 2026-11-15 audit: Disable / Clear Bay confirm like every other
+  // state-changing control; Escape closes whatever modal is open.
+  const [confirmShelf, setConfirmShelf] = React.useState(null); // {n, kind:'disable'|'clear'}
+  React.useEffect(()=>{
+    const onKey = (e)=>{ if(e.key==='Escape'){ const b=document.querySelector('.fx-back'); if(b) b.click(); } };
+    window.addEventListener('keydown', onKey);
+    return ()=>window.removeEventListener('keydown', onKey);
+  }, []);
+  const chip = (fn)=>({ role:'button', tabIndex:0, onClick:fn, onKeyDown:(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fn(); } } });
   const rs = PG.RACK_STATUS[rackStatus] || PG.RACK_STATUS.Operational;
 
   // fallbacks so the component also works standalone (e.g. the handoff figure)
@@ -389,20 +398,20 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           <div className="ttl">Propagation Unit · No. 01</div>
         </div>
         <div className="db-chips">
-        <div className={'db-alertbtn'+(alerts.length?'':' calm')} onClick={()=>setShowAlerts(true)}>
+        <div className={'db-alertbtn'+(alerts.length?'':' calm')} {...chip(()=>setShowAlerts(true))}>
           Alerts <span className="cnt">{alerts.length}</span>
         </div>
         {auth && auth.canManage &&
-          <div className="db-user" onClick={auth.openOperators} title="Manage operators">Operators</div>}
+          <div className="db-user" {...chip(auth.openOperators)} title="Manage operators">Operators</div>}
         {ses
-          ? <div className="db-user" onClick={()=>setShowSignOut(true)} title="Sign out">
+          ? <div className="db-user" {...chip(()=>setShowSignOut(true))} title="Sign out">
               <span style={{width:9,height:9,borderRadius:'50%',background:'var(--sage)'}}></span>
               <div className="who"><b>{ses.name}</b><span className="role">{ses.role}</span></div>
             </div>
-          : <div className="db-user" onClick={()=>setShowSignIn(true)}>Sign In</div>}
+          : <div className="db-user" {...chip(()=>setShowSignIn(true))}>Sign In</div>}
         {/* change 2: maintenance toggle (Grower/Steward). Confirms both ways. */}
         {canToggleMaint &&
-          <div className="db-user" onClick={()=>setShowMaint(true)}
+          <div className="db-user" {...chip(()=>setShowMaint(true))}
             title={maintenance?'Resume irrigation automation':'Suspend irrigation automation'}
             style={maintenance?{borderColor:'var(--ochre-deep)',color:'var(--ochre-deep)'}:undefined}>
             <span style={{width:9,height:9,borderRadius:'50%',background:maintenance?'var(--ochre-deep)':'var(--char)'}}></span>
@@ -410,7 +419,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           </div>}
         {/* audit 3.3: emergency stop / reset safety (Grower+). Confirms both ways. */}
         {canStop &&
-          <div className={'db-user db-estop'+(estop?' active':'')} onClick={()=>setShowEstop(true)}
+          <div className={'db-user db-estop'+(estop?' active':'')} {...chip(()=>setShowEstop(true))}
             title={estop?'Reset the safety supervisor':'Emergency stop — all outputs off'}>
             {estop?'Reset safety':'E-STOP'}
           </div>}
@@ -434,8 +443,8 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         {tab==='Shelf Management' && <ShelvesTab shelves={effShelves}
           onAssign={(n)=>setAssignFor({n})}
           onEdit={(s)=>setAssignFor({n:s.n, initial:editInitial(s)})}
-          onSetEnabled={onSetEnabled}
-          onUnassign={onUnassign}
+          onSetEnabled={onSetEnabled ? (n,en)=>{ if(en) onSetEnabled(n,true); else setConfirmShelf({n,kind:'disable'}); } : undefined}
+          onUnassign={onUnassign ? (n)=>setConfirmShelf({n,kind:'clear'}) : undefined}
           role={role}/>}
         {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries} shelves={effShelves}/>}
         {tab==='Controls' && <ControlsTab role={role} controls={controls}/>}
@@ -455,6 +464,14 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         onCancel={()=>setShowEstop(false)}
         onConfirm={()=>{ (estop ? onSafetyReset : onEmergencyStop)?.(); setShowEstop(false); }}/>}
       {/* change 2: confirm entering/leaving maintenance mode. */}
+      {confirmShelf && <Confirm
+        title={confirmShelf.kind==='clear' ? `Clear Shelf ${confirmShelf.n}` : `Disable Shelf ${confirmShelf.n}`}
+        body={confirmShelf.kind==='clear'
+          ? 'Remove the specimen and its settings from this bay? The shelf becomes vacant and nothing waters it until a new assignment is made.'
+          : 'Pause this shelf? Its probe readings are ignored and no soak will fire for it until it is enabled again.'}
+        confirmLabel={confirmShelf.kind==='clear' ? 'Clear bay' : 'Disable shelf'} danger={confirmShelf.kind==='clear'}
+        onCancel={()=>setConfirmShelf(null)}
+        onConfirm={()=>{ const c=confirmShelf; setConfirmShelf(null); if(c.kind==='clear') onUnassign && onUnassign(c.n); else onSetEnabled && onSetEnabled(c.n,false); }}/>}
       {showMaint && <Confirm
         title={maintenance?'Resume automation':'Enter maintenance mode'}
         body={maintenance
