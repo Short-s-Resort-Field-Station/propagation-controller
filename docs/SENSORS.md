@@ -94,22 +94,33 @@ until bring-up.
 Austin's weigh-and-wet run: a 2-inch Deepot (550 ml of the shelf 1/2
 bark-and-peat mix, 254.9 g air-dry) with the shelf 2 probe centred as on the
 shelf, water poured from the top in steps, the pot weighed at each step so the
-true volumetric water content is water mass ÷ 550 ml. The probe over-reads
-the dry end and converges near container capacity (~29 % by volume, 159 g):
+true volumetric water content is water mass ÷ 550 ml.
 
-| probe reads | true %VWC |
-|---|---|
-| 5 | 0 |
-| 20.7 | 7.9 |
-| 27.6 | 14.3 |
-| 32.7 | 19.8 |
-| 36 | 28 (steps at 24.9 and 29.6 both read ~36; the plateau) |
+| when | probe reads | true %VWC | note |
+|---|---|---|---|
+| dry mix | 5 | 0 | equilibrated |
+| 43 ml, +5 min | 20.7 | 7.9 | top-pour transient |
+| 79 ml, +5 min | 27.6 | 14.3 | transient |
+| 109 ml, +9 min | 32.7 | 19.8 | transient |
+| 137 ml, +8 min | 36.0 | 24.9 | transient |
+| 159 ml, +10 min, free drainage | 35.5 | 28.9 | transient |
+| same pot, 2 h later | 30.6 | 28.5 | **equilibrated** — pot lost 2 g, probe fell 5 points |
 
-Applied as `curve` on the moisture register of `soil_zone_1` and
-`soil_zone_2` (same mix, probes agree within 3 points in the same pot), and
-the two shelves' rules were re-expressed through the same curve so the
-watering behaviour did not move. Shelf 3 (mountain-laurel grit) is NOT
-calibrated: it needs its own run. Caveats: top-pour in a tube puts early
-water at the tines, so the dry-end gap is partly geometry; on the shelf the
-water comes from below. Readings stored before the switch are on the old
-scale. Raw points: scratchpad `calibration-points.csv` (session 2026-11-15).
+The lesson is in the last row: minutes after a top-pour the water sits at the
+tines and the probe reads well above the pot average; two hours later, with
+the same water in the pot, it reads 5 points lower. The mid-run points are
+therefore pour transients, not calibration. The two equilibrated points
+describe the state the shelf actually lives in (hours after a soak):
+
+    true ≈ (reading − 5) × 1.11      i.e. the factory curve is nearly right,
+                                      ~3–5 points high in this mix
+
+Applied as `curve: [[5,0],[30.6,28.5]]` on the moisture register of
+`soil_zone_1` and `soil_zone_2` (same mix; the probes agree within 3 points in
+one pot), and their rules re-expressed through it so behaviour did not move
+(z1 16/24 → 12.2/21.2, z2 22/26 → 18.9/23.4). Container capacity ≈ 28–29 %
+by volume. Shelf 3 (mountain-laurel grit) is NOT calibrated. Readings stored
+before the switch are on the factory scale. To refine: weigh a bare Deepot of
+mix lifted off the tray an hour or more after a real soak and read its probe;
+each such pair is an equilibrated point. Raw log: session scratchpad
+`calibration-points.csv`, 2026-11-15.
