@@ -41,12 +41,14 @@ body.console .db::before { content: ""; position: absolute; inset: 6px; border: 
 body.console .db > *:not(.fx-back) { position: relative; z-index: 1; } /* modals stay viewport-fixed */
 
 /* ---------- masthead + tabs ----------
-   Row 1: the seal · the panel's centred eyebrow + title · the session chips.
+   Row 1: the seal, centred over the panel's eyebrow + title · the session chips.
    Row 2, on its own rule: the four tabs as plaques, rack status at the far end. */
 body.console .db-top { display: block; border-bottom: 1.5px solid var(--rule); background: transparent; padding: 0; }
 body.console .db-mast { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 14px 22px 12px; }
 body.console .db-brand { border-right: 0; padding: 0; gap: 0; }
-body.console .db-brand img { opacity: .92; }
+body.console .db-seal { margin-bottom: 6px; }
+/* the seal art is sage-on-clear, drawn for paper; on the console it is struck in the title's cream */
+body.console .db-seal img { width: 120px; height: 120px; filter: brightness(0) invert(1) sepia(.3) saturate(.8); opacity: .9; }
 body.console .db-mh { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
 body.console .db-mh .eye { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: var(--char); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 body.console .db-mh .dia { width: 7px; height: 7px; background: currentColor; transform: rotate(45deg); flex: none; }
@@ -76,9 +78,9 @@ body.console .db-statuschip { cursor: default; color: var(--sage); border-color:
 body.console .db-statuschip .d { width: 7px; height: 7px; border-radius: 0; transform: rotate(45deg); background: currentColor; }
 body.console .db-toast { background: #1B1812F2; border: 1px solid var(--ochre); color: var(--ochre); }
 @media (max-width: 1180px) {
-  body.console .db-mast { grid-template-columns: auto 1fr; }
-  body.console .db-mh { align-items: flex-start; text-align: left; }
-  body.console .db-chips { grid-column: 1 / -1; justify-content: flex-start; }
+  body.console .db-mast { grid-template-columns: 1fr; }
+  body.console .db-brand { display: none; }
+  body.console .db-chips { justify-content: center; }
 }
 @media (max-width: 760px) {
   /* 2026-11-15 layout audit */
@@ -94,6 +96,7 @@ body.console .db-toast { background: #1B1812F2; border: 1px solid var(--ochre); 
   body.console .db-mast { padding: 10px 14px; gap: 10px; }
   body.console .db-mh .ttl { font-size: 18px; white-space: normal; }
   body.console .db-mh .eye { font-size: 9px; white-space: normal; }
+  body.console .db-seal img { width: 84px; height: 84px; }
   body.console .db-chips > * { flex: 1 1 auto; justify-content: center; }
   body.console .db-tabbar { flex-wrap: wrap; padding: 8px 14px; }
   body.console .db-tabs { display: grid; grid-template-columns: 1fr 1fr; border: 0; flex: 1 0 100%; }

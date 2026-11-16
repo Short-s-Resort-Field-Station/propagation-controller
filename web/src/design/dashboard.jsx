@@ -390,10 +390,9 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
       {maintenance && <MaintenanceBanner canManage={!!canToggleMaint} onExit={()=>setShowMaint(true)}/>}
       <div className="db-top">
        <div className="db-mast">
-        <div className="db-brand">
-          <ForestMark size={46}/>
-        </div>
+        <div className="db-brand" aria-hidden="true"></div>
         <div className="db-mh">
+          <div className="db-seal"><ForestMark size={120}/></div>
           <div className="eye"><span className="dia"></span>Dept. of Forestry · Field Station<span className="dia"></span></div>
           <div className="ttl">Propagation Unit · No. 01</div>
         </div>
