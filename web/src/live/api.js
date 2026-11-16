@@ -6,8 +6,13 @@ export const BASE = '/propagate/api/v1';
 
 // Audit 3.5: a wedged daemon or black-holed Wi-Fi path must not leave fetches
 // pending forever — GETs give up after 4 s, mutations after 8 s.
-const GET_TIMEOUT_MS = 4000;
+// 2026-11-15: through the Cloudflare tunnel a round trip can run 1.5 s on a
+// slow evening, and the Environmental charts pull nine series — a 4 s
+// patience made the page call the controller unreachable while it was
+// merely far away. Polls get 8 s, chart series 20 s.
+const GET_TIMEOUT_MS = 8000;
 const MUTATION_TIMEOUT_MS = 8000;
+const SERIES_TIMEOUT_MS = 20000;
 
 // Audit 3.10/3.11: the dashboard registers a handler here so any 401 (expired
 // cookie, revoked account) clears its session and reopens sign-in. Login
@@ -90,7 +95,8 @@ export const api = {
   // Timeline series (2026-11-11): interval "hour" = stored hourly aggregates
   // (limit covers a season), or a bucket width like "5m" for the 24-hour view.
   series: (sensorKey, fromISO, interval = 'hour') =>
-    req(`/sensors/${sensorKey}/readings?interval=${encodeURIComponent(interval)}&from=${encodeURIComponent(fromISO)}&limit=2400`),
+    req(`/sensors/${sensorKey}/readings?interval=${encodeURIComponent(interval)}&from=${encodeURIComponent(fromISO)}&limit=2400`,
+      typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? { signal: AbortSignal.timeout(SERIES_TIMEOUT_MS) } : undefined),
   lightingSchedule: () => req('/lighting/schedule'),
   settings: () => req('/settings'),
   putSettings: (body) => req('/settings', {
