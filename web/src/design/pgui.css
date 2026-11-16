@@ -753,7 +753,13 @@
 
   /* controls */
   .ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  .ctrl-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--rule-soft)}
+  /* 2026-11-15: a row too narrow for its label + three-way switch used to clip
+     the switch (overflow:hidden on .seg) — on the phone the Auto button was
+     unreachable. The switch never shrinks; the row wraps it underneath instead. */
+  .ctrl-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:14px 0;border-top:1px solid var(--rule-soft)}
+  .ctrl-row .seg{flex:none;margin-left:auto}
+  .ctrl-row .cl{min-width:0}
+  .seg button{white-space:nowrap}
   .ctrl-row:first-child{border-top:0}
   .ctrl-row .cl{font-family:"Newsreader",serif;font-size:15px}
   .ctrl-row .cl small{display:block;font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#1B181399;margin-top:2px}
