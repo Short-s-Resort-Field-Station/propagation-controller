@@ -105,3 +105,26 @@ sudo systemctl enable nftables
 To open the dashboard to the LAN again temporarily, add `80` back to the
 `tcp dport` set and re-run `nft -f`.
 
+## Auto-install from GitHub
+
+Every push to `main` runs `.github/workflows/release.yml`: web tests, `make
+web`, Go tests, `make linux` with the build stamp, then a GitHub release
+tagged `build-<sha>` carrying the two binaries, `deploy.tar.gz` and
+`SHA256SUMS`. A red test suite publishes nothing.
+
+On the unit, `propagation-update.timer` (root, 5 min after boot, then every 10
+min) runs `/opt/propagation-controller/propagation-update.py`: it compares the
+latest release tag with the running build from `/health`, waits until no
+shelf is running or queued, downloads and verifies the assets, keeps the old
+binaries as `*.prev`, runs `install.sh`, and rolls back if the new build is
+not healthy within 90 s. The kiosk reloads itself on the new build stamp.
+
+```sh
+sudo python3 /opt/propagation-controller/propagation-update.py --check   # what it would do
+journalctl -u propagation-update -n 30                                  # recent runs
+sudo systemctl disable --now propagation-update.timer                   # opt out
+```
+
+A manual `scp` + `install.sh` still works and the updater will leave a
+matching build alone.
+

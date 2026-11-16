@@ -22,4 +22,13 @@ systemctl enable propagationd
 systemctl restart propagationd   # restart, not enable --now: an upgrade must swap the running binary
 [ -f /etc/systemd/system/propagation-watchdog.service ] && systemctl enable --now propagation-watchdog
 
+# Self-update (2026-11-15): a root timer polls GitHub releases and re-runs this
+# script with the new build. Disable with: systemctl disable --now propagation-update.timer
+if [ -f update/propagation-update.py ]; then
+  install -m 755 update/propagation-update.py /opt/propagation-controller/propagation-update.py
+  install -m 644 systemd/propagation-update.service systemd/propagation-update.timer /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now propagation-update.timer
+fi
+
 echo "== Done. Health: curl http://localhost/api/v1/health =="

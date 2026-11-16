@@ -1,0 +1,51 @@
+# Build-and-release on every push to main (Austin, 2026-11-15: "every time we
+# push an update to github, the control box auto installs it"). The unit's
+# updater (deploy/update/) polls the latest release, verifies SHA256SUMS and
+# runs install.sh. Tests gate the release: a red suite publishes nothing.
+name: release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Web tests
+        run: cd web && npm ci && npm run test
+      - name: Web build + embed
+        run: make web
+      - name: Go tests
+        run: go test ./...
+      - name: Linux binaries
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          make linux BUILD_STAMP="${SHA}-$(date -u +%Y%m%d%H%M)"
+          mkdir -p out
+          cp bin/propagationd-linux-amd64 bin/propagation-watchdog-linux-amd64 bin/probe-address-linux-amd64 out/
+          tar -C . -czf out/deploy.tar.gz deploy
+          (cd out && sha256sum * > SHA256SUMS)
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${SHA}"
+          gh release view "$TAG" >/dev/null 2>&1 && gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" out/* \
+            --title "build ${SHA}" \
+            --notes "$(git log -1 --pretty=%s) — auto-built from $(git rev-parse HEAD)"
