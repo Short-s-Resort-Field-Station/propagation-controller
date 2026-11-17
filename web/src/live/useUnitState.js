@@ -132,6 +132,10 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
         reservoirReadAt: reservoir.readAt,
         rackStatus: buildRackStatus({ health, safety, zonesResp, maintenance }),
         lockouts: buildLockouts(safety),
+        // 2026-11-17: lockouts latched until a person resets (auto ones clear
+        // themselves), and the editable reservoir cutoff the screens draw.
+        latched: ((safety && safety.lockouts) || []).filter((l) => l && l.auto === false).map((l) => l.key),
+        reservoirFloor: (safety && safety.reservoir && safety.reservoir.min_level) || 20,
         log: buildLog(eventsResp),
         clock: now,
         lastSync: now,

@@ -71,9 +71,11 @@ func newGuardServer(t *testing.T) (*Server, http.Handler) {
 	r.Post("/relays/{channel}/set", s.handleSetRelay)
 	r.Post("/diagnostics/modbus/scan", s.handleModbusScan)
 	r.Post("/system/shutdown", s.handleSystemShutdown)
+	r.Post("/irrigation/zones/{zone_key}/run", s.handleRunZone)
 	r.Post("/irrigation/zones/{zone_key}/drain", s.handleDrainZone)
 	r.Post("/irrigation/zones/{zone_key}/stop", s.handleStopZone)
 	s.zones = zones
+	s.moisture = storage.NewMoistureRuleRepo(db)
 	return s, r
 }
 
@@ -277,4 +279,31 @@ func TestStopDequeuesWaitingShelf(t *testing.T) {
 	if st.Active == nil || st.Active.ZoneKey != "zone_1" {
 		t.Errorf("cancelling the queued shelf disturbed the running one: %+v", st.Active)
 	}
+}
+
+// TestWaterNowRunsTheShelfSoakTime: a hand watering with no duration runs the
+// shelf's moisture-rule soak time (what Edit Shelf's "Soak" field writes and
+// the confirm dialog quotes), not the zone default no screen edits.
+func TestWaterNowRunsTheShelfSoakTime(t *testing.T) {
+	s, h := newGuardServer(t)
+	zone, err := s.zones.GetByKey("zone_1")
+	if err != nil || zone == nil {
+		t.Fatalf("zone_1: %v", err)
+	}
+	if err := s.moisture.Upsert(storage.MoistureRule{ZoneID: zone.ID, Enabled: true,
+		SensorKey: "soil_zone_1_moisture", TriggerBelow: 20, RunDurationSeconds: 420,
+		MinimumIntervalMinutes: 240, SensorOfflineBehavior: "lockout"}); err != nil {
+		t.Fatalf("upsert rule: %v", err)
+	}
+	w := post(h, "/irrigation/zones/zone_1/run", `{"actor":"manual_web","reason":"water now"}`)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("run: status %d body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["duration_seconds"] != float64(420) {
+		t.Errorf("water now ran %v s, want the rule's 420", resp["duration_seconds"])
+	}
+	s.irrigation.StopAll("test")
+	waitIdle(t, s.irrigation)
 }

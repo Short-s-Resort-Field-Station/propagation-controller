@@ -377,17 +377,35 @@ func (s *Supervisor) EmergencyStop(ctx context.Context, actor, reason string) {
 	}
 }
 
-// Reset clears the emergency stop latch. Lockouts are unaffected: a manual
-// lockout still needs its own clear, and auto lockouts re-evaluate live.
+// Reset clears everything that is latched and waiting on a person: the
+// emergency stop and any manual lockout (e.g. pump_max_runtime). Auto
+// lockouts are untouched; they track a live condition and clear themselves.
+//
+// 2026-11-17: Reset used to clear only the e-stop, and no screen offered the
+// separate lockout clear, so a latched pump lockout could only be cleared
+// with curl. One reset, from either screen, now clears both.
 func (s *Supervisor) Reset(actor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.estop.Active {
-		return fmt.Errorf("emergency stop is not active")
+	var latched []string
+	for key, lo := range s.lockouts {
+		if !lo.Auto {
+			latched = append(latched, key)
+		}
 	}
-	s.estop = EstopState{}
+	if !s.estop.Active && len(latched) == 0 {
+		return fmt.Errorf("nothing to reset: no emergency stop and no latched lockout")
+	}
+	if s.estop.Active {
+		s.estop = EstopState{}
+		s.events.Info("emergency_stop_reset", "emergency stop reset; automation may resume", actor, nil)
+	}
+	for _, key := range latched {
+		delete(s.lockouts, key)
+		s.events.Info("safety_lockout_cleared", fmt.Sprintf("lockout %s cleared", key), actor,
+			map[string]any{"lockout": key})
+	}
 	s.persistStateLocked()
-	s.events.Info("emergency_stop_reset", "emergency stop reset; automation may resume", actor, nil)
 	return nil
 }
 

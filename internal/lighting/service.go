@@ -253,19 +253,24 @@ func (s *Service) tick(ctx context.Context) {
 	}
 }
 
-func (s *Service) apply(ctx context.Context, on bool, actor, reason string) {
+// apply switches the relay. It returns an error when the relay did not move
+// (blocked by safety, or the board refused); the scheduler tick ignores it
+// and tries again, a manual command reports it to the person who pressed.
+func (s *Service) apply(ctx context.Context, on bool, actor, reason string) error {
 	state := relay.Off
 	if on {
 		state = relay.On
 	}
 	if err := s.safety.Authorize(s.channel, state); err != nil {
 		s.log.Warn().Err(err).Msg(s.label + ": command blocked by safety")
-		return
+		return fmt.Errorf("blocked by safety: %w", err)
 	}
 	if _, err := s.mgr.SetRelay(ctx, s.channel, state, actor, reason, 0); err != nil {
 		s.events.Error(s.label+"_command_failed", s.label+" relay command failed", actor,
 			map[string]any{"error": err.Error()})
+		return fmt.Errorf("relay did not switch: %w", err)
 	}
+	return nil
 }
 
 // SetOverride handles manual on/off. mode "auto" clears the override and
@@ -283,9 +288,14 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 		s.override = o
 		s.mu.Unlock()
 		s.persistOverride(o)
-		s.apply(ctx, mode == "on", actor, "manual lighting override")
+		applyErr := s.apply(ctx, mode == "on", actor, "manual lighting override")
 		s.events.Info(s.label+"_override", fmt.Sprintf(s.label+" manually forced %s", mode), actor,
 			map[string]any{"expires_minutes": expiresMinutes})
+		if applyErr != nil {
+			// The override stands (it is what the operator asked for and the
+			// tick keeps trying), but the press must not look like it worked.
+			return fmt.Errorf("%s set to %s, but %v", s.label, mode, applyErr)
+		}
 		return nil
 	case "auto":
 		s.mu.Lock()
@@ -298,7 +308,9 @@ func (s *Service) SetOverride(ctx context.Context, mode, actor string, expiresMi
 			s.events.Info(s.label+"_override_cleared", s.label+" override cleared; returning to schedule", actor, nil)
 		}
 		if expected != nil {
-			s.apply(ctx, *expected, "schedule", "override cleared")
+			if err := s.apply(ctx, *expected, "schedule", "override cleared"); err != nil {
+				return fmt.Errorf("%s back on its schedule, but %v", s.label, err)
+			}
 		}
 		return nil
 	default:

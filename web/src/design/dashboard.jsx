@@ -11,7 +11,7 @@ import { DialG } from './rack3.jsx';
 const DB_TABS = ['Dashboard','Shelf Management','Environmental','Controls'];
 
 // ---------- DASHBOARD (overview + log) ----------
-function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, alerts, onOpenAlerts, onOpenHistory }){
+function OverviewTab({ shelves, reservoir, reservoirOnline=true, reservoirFloor=20, rackStatus, lockouts=[], log, alerts, onOpenAlerts, onOpenHistory }){
   const active = shelves.filter(s=>s.active);
   const rs = PG.RACK_STATUS[rackStatus] || PG.RACK_STATUS.Operational;
   const issues = shelves.filter(s=>s.active && (s.status==='Monitoring'||s.status==='Dry'||s.status==='Sensor Fault'));
@@ -85,10 +85,10 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, rackStatus, loc
               </div>
             </div>
             <div className="db-glass-st">
-              <span className="db-chip" style={{color:!reservoirOnline?'var(--oxblood)':reservoir>20?'var(--sage)':'var(--oxblood)'}}>
-                <i className="dia"></i>{!reservoirOnline?'Sensor offline':reservoir>20?'Level nominal':'Refill required'}
+              <span className="db-chip" style={{color:!reservoirOnline?'var(--oxblood)':reservoir>reservoirFloor?'var(--sage)':'var(--oxblood)'}}>
+                <i className="dia"></i>{!reservoirOnline?'Sensor offline':reservoir>reservoirFloor?'Level nominal':'Refill required'}
               </span>
-              <span className="k">lockout floor · 20%</span>
+              <span className="k">lockout floor · {reservoirFloor}%</span>
             </div>
           </div>
         </div>
@@ -136,7 +136,7 @@ function ShelfCard({ s, onAssign, onEdit, onSetEnabled, onUnassign, role }){
           <div style={{padding:'0 18px 16px',display:'flex',gap:8}}>
             <button className="fx-btn" style={{flex:1}} disabled={readonly}
               onClick={()=>onEdit && onEdit(s)}>
-              {readonly ? 'Sign in to edit' : 'Edit Shelf ›'}
+              {!role ? 'Sign in to edit' : readonly ? 'Steward only' : 'Edit Shelf ›'}
             </button>
             {/* change 2: manual override — pause this shelf's sensors + valve. */}
             {!readonly && onSetEnabled &&
@@ -246,7 +246,9 @@ function EnvironmentalTab({ getSeries, shelves=[] }){
   const perShelf = isLive && live.perShelf ? live.perShelf : [];
   const curN = perShelf.some(ps=>String(ps.n)===String(shelfN)) ? shelfN : (perShelf[0] ? perShelf[0].n : null);
   const range = isLive && live.range ? live.range : { fromMs: Date.now()-(HOURS[period]||168)*3600e3, toMs: Date.now() };
-  const waterEvents = isLive ? live.water : PG.series((periods.indexOf(period)+1)*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
+  // 2026-11-17: demo bars only in the design preview (no getSeries). On the
+  // live page an unloaded tab shows nothing rather than invented pump time.
+  const waterEvents = isLive ? live.water : getSeries ? [] : PG.series((periods.indexOf(period)+1)*5.5, 14, 3, 5, 0).map(v=>Math.max(0,Math.round(v*10)/10));
   return (
     <div>
       <div className="db-h">
@@ -345,7 +347,7 @@ function initialTab(){
 
 // `auth` (live build): { SignInModal, canManage, openOperators } — swaps the
 // demo PIN sign-in for the real one and adds operator management for admins.
-function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, onEmergencyStop, onSafetyReset, signInRequest=0, push=null }){
+function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, latched=[], reservoirFloor=20, loadHistory, onEmergencyStop, onSafetyReset, signInRequest=0, push=null }){
   const [tab, setTab] = React.useState(initialTab);
   const [assignFor, setAssignFor] = React.useState(null);
   const [showSignIn, setShowSignIn] = React.useState(false);
@@ -381,6 +383,10 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
 
   const canToggleMaint = role==='Steward' && onSetMaintenance; // PUT /settings is admin-only
   const canStop = role && role!=='Viewer' && (onEmergencyStop || onSafetyReset);
+  // 2026-11-17: a latched lockout (pump ran past its limit) needs the same
+  // reset as an e-stop; before this no screen could clear one.
+  const needsReset = estop || latched.length>0;
+  const latchedText = latched.join(', ').replace(/_/g,' ');
   return (
     <div className="db">
       {connection==='offline' && <OfflineBanner lastSync={lastSync}/>}
@@ -393,7 +399,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         <div className="db-brand" aria-hidden="true"></div>
         <div className="db-mh">
           <div className="db-seal"><ForestMark size={120}/></div>
-          <div className="eye"><span className="dia"></span>Dept. of Forestry · Field Station<span className="dia"></span></div>
+          <div className="eye"><span className="dia"></span>Short’s Field Station · Department of Forestry<span className="dia"></span></div>
           <div className="ttl">Propagation Unit · No. 01</div>
         </div>
         <div className="db-chips">
@@ -418,9 +424,9 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           </div>}
         {/* audit 3.3: emergency stop / reset safety (Grower+). Confirms both ways. */}
         {canStop &&
-          <div className={'db-user db-estop'+(estop?' active':'')} {...chip(()=>setShowEstop(true))}
-            title={estop?'Reset the safety supervisor':'Emergency stop — all outputs off'}>
-            {estop?'Reset safety':'E-STOP'}
+          <div className={'db-user db-estop'+(needsReset?' active':'')} {...chip(()=>setShowEstop(true))}
+            title={needsReset?'Reset the safety supervisor':'Emergency stop — all outputs off'}>
+            {needsReset?'Reset safety':'E-STOP'}
           </div>}
         </div>
        </div>
@@ -438,7 +444,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
       {/* audit 3.1: the last rejected command, under the top bar. */}
       {toast && <div className="db-toast" onClick={onDismissToast} role="status"><span className="d"></span>{toast.text}</div>}
       <div className="db-body">
-        {tab==='Dashboard' && <OverviewTab shelves={effShelves} reservoir={reservoir} reservoirOnline={reservoirOnline} rackStatus={rackStatus} lockouts={lockouts} log={log} alerts={alerts} onOpenAlerts={()=>setShowAlerts(true)} onOpenHistory={()=>setShowHistory(true)}/>}
+        {tab==='Dashboard' && <OverviewTab shelves={effShelves} reservoir={reservoir} reservoirOnline={reservoirOnline} reservoirFloor={reservoirFloor} rackStatus={rackStatus} lockouts={lockouts} log={log} alerts={alerts} onOpenAlerts={()=>setShowAlerts(true)} onOpenHistory={()=>setShowHistory(true)}/>}
         {tab==='Shelf Management' && <ShelvesTab shelves={effShelves}
           onAssign={(n)=>setAssignFor({n})}
           onEdit={(s)=>setAssignFor({n:s.n, initial:editInitial(s)})}
@@ -455,13 +461,15 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         profiles={profiles}/>}
       {/* audit 3.3: confirm e-stop / reset. */}
       {showEstop && <Confirm
-        title={estop?'Reset safety':'Emergency stop'}
+        title={needsReset?'Reset safety':'Emergency stop'}
         body={estop
-          ? 'Clear the emergency stop? Automation resumes; any lockouts still in force stay until their condition clears.'
-          : 'Stop everything now? Pump, valves and lighting are switched off and held off until a Grower or Steward resets safety.'}
-        confirmLabel={estop?'Reset':'E-STOP'} danger={!estop}
+          ? 'Clear the emergency stop? Automation resumes.'+(latched.length?' The latched lockout ('+latchedText+') is cleared too.':'')+' A lockout that tracks a live condition, like a low reservoir, stays until the condition clears.'
+          : latched.length
+            ? 'Clear the latched lockout ('+latchedText+')? It latched because the pump ran past its limit. Look at the pump, the tray and the reservoir before you reset.'
+            : 'Stop everything now? Pump, valves and lighting are switched off and held off until a Grower or Steward resets safety.'}
+        confirmLabel={needsReset?'Reset':'E-STOP'} danger={!needsReset}
         onCancel={()=>setShowEstop(false)}
-        onConfirm={()=>{ (estop ? onSafetyReset : onEmergencyStop)?.(); setShowEstop(false); }}/>}
+        onConfirm={()=>{ (needsReset ? onSafetyReset : onEmergencyStop)?.(); setShowEstop(false); }}/>}
       {/* change 2: confirm entering/leaving maintenance mode. */}
       {confirmShelf && <Confirm
         title={confirmShelf.kind==='clear' ? `Clear Shelf ${confirmShelf.n}` : `Disable Shelf ${confirmShelf.n}`}
@@ -484,7 +492,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
         : <SignInModal onClose={()=>setShowSignIn(false)} onSignIn={(op)=>{ signInFn(op); setShowSignIn(false); }}/>)}
       {showSignOut && <Confirm title="Sign out" body={`Sign out ${ses?ses.name:''}? Unsaved control changes are discarded.`} confirmLabel="Sign out" danger onCancel={()=>setShowSignOut(false)} onConfirm={()=>{ signOutFn(); setShowSignOut(false); }}/>}
       {showAlerts && <AlertsModal alerts={alerts} push={push} onAck={ackFn} onAckAll={ackAllFn} onClose={()=>setShowAlerts(false)}/>}
-      {showHistory && <HistoryModal onClose={()=>setShowHistory(false)}/>}
+      {showHistory && <HistoryModal load={loadHistory} onClose={()=>setShowHistory(false)}/>}
     </div>
   );
 }

@@ -13,8 +13,11 @@ import (
 
 type zoneView struct {
 	storage.Zone
-	State        string          `json:"state"` // running | queued | ready | disabled
-	LastCycle    *storage.Cycle  `json:"last_cycle,omitempty"`
+	State     string         `json:"state"` // running | queued | ready | disabled
+	LastCycle *storage.Cycle `json:"last_cycle,omitempty"`
+	// LastWatering is the last cycle that actually put water on the shelf
+	// (pump time > 0). LastCycle may be a drain, a purge or a refused attempt.
+	LastWatering *storage.Cycle  `json:"last_watering,omitempty"`
 	LatestValues map[string]any  `json:"latest,omitempty"`
 	Config       json.RawMessage `json:"config"`
 }
@@ -24,6 +27,9 @@ func (s *Server) zoneView(z storage.Zone) zoneView {
 	v.ConfigJSON = "" // avoid duplicating raw JSON as a string field
 	if z.Enabled {
 		v.State = s.irrigation.ZoneState(z.ZoneKey)
+	}
+	if lw, err := s.cycles.LastWateringForZone(z.ID); err == nil && lw != nil {
+		v.LastWatering = lw
 	}
 	if last, err := s.cycles.LastForZone(z.ID); err == nil && last != nil {
 		v.LastCycle = last
@@ -246,11 +252,23 @@ func (s *Server) handleRunZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.DurationSeconds <= 0 {
-		// Fall back to the zone's configured default run time.
+		// A hand watering runs the shelf's own soak time: the moisture rule's
+		// run_duration_seconds, which is the number Edit Shelf's "Soak" field
+		// writes and the confirm dialog quotes. Until 2026-11-17 this used the
+		// zone's default_run_seconds, which no screen edits, so Water Now ran a
+		// different length from the automatic soak. That default is now only
+		// the fallback for a shelf with no rule.
 		if zone, err := s.zones.GetByKey(zoneKey); err == nil && zone != nil {
-			var cfg irrigation.ZoneConfig
-			json.Unmarshal([]byte(zone.ConfigJSON), &cfg)
-			req.DurationSeconds = cfg.DefaultRunSeconds
+			if s.moisture != nil {
+				if rule, err := s.moisture.GetByZoneID(zone.ID); err == nil && rule != nil && rule.RunDurationSeconds > 0 {
+					req.DurationSeconds = rule.RunDurationSeconds
+				}
+			}
+			if req.DurationSeconds <= 0 {
+				var cfg irrigation.ZoneConfig
+				json.Unmarshal([]byte(zone.ConfigJSON), &cfg)
+				req.DurationSeconds = cfg.DefaultRunSeconds
+			}
 		}
 		if req.DurationSeconds <= 0 {
 			req.DurationSeconds = 60

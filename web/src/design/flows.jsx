@@ -459,31 +459,48 @@ function AlertsModal({ alerts, push=null, onAck, onAckAll, onClose }){
 }
 
 /* ============ FLOW 5 · HISTORY + EXPORT ============ */
-function HistoryModal({ onClose }){
+// 2026-11-17: on the live dashboard this reads the unit's real event log
+// through `load(hours)`. It used to render PG.history(), a demo generator, so
+// the public page showed and exported events that never happened. PG.history
+// is now only the design preview's fallback (no `load`).
+function HistoryModal({ onClose, load }){
   const ranges=['24 Hours','7 Days','30 Days','Season'];
+  const HOURS=[24,168,720,2160];
   const [r,setR]=React.useState('7 Days');
-  const rows=PG.history(ranges.indexOf(r));
-  const csv='timestamp,event,detail,category\n'+rows.map(x=>`"${x.ts}","${x.ev}","${x.em}","${x.cat}"`).join('\n');
+  const [live,setLive]=React.useState({ rows:null, error:'' });
+  React.useEffect(()=>{
+    if(!load) return;
+    let on=true;
+    setLive({ rows:null, error:'' });
+    load(HOURS[ranges.indexOf(r)]).then(rows=>{ if(on) setLive({ rows:rows||[], error:'' }); })
+      .catch(e=>{ if(on) setLive({ rows:[], error:(e&&e.message)||'could not read the event log' }); });
+    return ()=>{ on=false; };
+  },[r,load]);
+  const rows=load ? (live.rows||[]) : PG.history(ranges.indexOf(r));
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const csv='timestamp,event,detail\n'+rows.map(x=>[q(x.ts),q(x.ev),q(x.em)].join(',')).join('\n');
   const href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   return (
     <div className="fx-back" onClick={onClose}><div className="fx-modal" style={{maxWidth:'720px'}} onClick={e=>e.stopPropagation()}>
-      <div className="fx-head"><span className="ttl">Event History</span><span className="tag">{rows.length} entries</span><span className="x" onClick={onClose}>&times;</span></div>
+      <div className="fx-head"><span className="ttl">Event History</span><span className="tag">{load && live.rows===null ? 'Loading…' : rows.length+' entries'}</span><span className="x" onClick={onClose}>&times;</span></div>
       <div className="fx-body">
         <div className="hs-controls">
           <div className="seg">{ranges.map(x=><button key={x} className={x===r?'on':''} onClick={()=>setR(x)}>{x}</button>)}</div>
           <a className="fx-btn" style={{marginLeft:'auto',textDecoration:'none'}} href={href} download={`propagation-unit-01-history-${r.replace(/\s/g,'').toLowerCase()}.csv`}>Export CSV</a>
         </div>
         <div className="hs-list">
+          {load && live.error && <div className="hs-row"><span className="ev">Could not read the event log<em>{live.error}</em></span></div>}
+          {load && live.rows && !live.error && rows.length===0 && <div className="hs-row"><span className="ev">No events in this period</span></div>}
           {rows.map((x,k)=>(
             <div className="hs-row" key={k}>
               <span className="ts" style={{color:'var(--char)'}}>{x.ts}</span>
               <span className="ev">{x.ev}<em>{x.em}</em></span>
-              <span className="cat"><span className="sev" style={{background:x.sev}}></span>{x.cat}</span>
+              <span className="cat"><span className="sev" style={{background:x.sev}}></span>{x.cat||''}</span>
             </div>
           ))}
         </div>
       </div>
-      <div className="fx-foot"><span className="note">Retention · 18 months on-unit; exported nightly to the field-station archive.</span><button className="fx-btn" onClick={onClose}>Close</button></div>
+      <div className="fx-foot"><span className="note">{load ? (rows.length>=500 ? 'Showing the newest 500 events in this period, from the unit\u2019s own log.' : 'From the unit\u2019s own event log, newest first.') : 'Retention · 18 months on-unit; exported nightly to the field-station archive.'}</span><button className="fx-btn" onClick={onClose}>Close</button></div>
     </div></div>
   );
 }

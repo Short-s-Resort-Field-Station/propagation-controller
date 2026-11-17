@@ -190,7 +190,8 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
   // relay is doing now. Before this the panel had no way back to Auto.
   const lightMode = s.lightOverride ? s.lightOverride.mode : 'auto';
   const fanMode = fanOverride ? fanOverride.mode : 'auto';
-  const forced = (o)=>`Forced ${o.mode}${o.until ? ' until '+fmtUntil(o.until) : ''}`;
+  const forced = (o, relayOn)=>`Forced ${o.mode}${o.until ? ' until '+fmtUntil(o.until) : ''}`
+    + (relayOn !== (o.mode==='on') ? ` · relay is ${relayOn?'on':'off'}` : '');
   return (
     <div className={"rk2-detail"+(theme==='light'?' light':'')}>
       <div className="rk2-grain"></div>
@@ -247,7 +248,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
         <div className="rk2-controls2">
           <div className="rk2-light">
             {/* audit 3.10: a manual override is visible wherever lights are toggled */}
-            <div className="ll"><span className="k">Lighting · Rack</span><span className="ph">{s.lightOverride ? forced(s.lightOverride) : `${s.on} – ${s.off} · ${lightOn?'on':'off'} now`}</span></div>
+            <div className="ll"><span className="k">Lighting · Rack</span><span className="ph">{s.lightOverride ? forced(s.lightOverride, lightOn) : `${s.on} – ${s.off} · ${lightOn?'on':'off'} now`}</span></div>
             <div className="rk2-seg three">
               <button className={lightMode==='on'?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(true))}>On</button>
               <button className={lightMode==='off'?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(false))}>Off</button>
@@ -255,7 +256,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
             </div>
           </div>
           <div className="rk2-light">
-            <div className="ll"><span className="k">Fans · Rack</span><span className="ph">{fanOverride ? forced(fanOverride) : `Circulation · ${fanOn?'on':'off'} now`}</span></div>
+            <div className="ll"><span className="k">Fans · Rack</span><span className="ph">{fanOverride ? forced(fanOverride, fanOn) : `Circulation · ${fanOn?'on':'off'} now`}</span></div>
             <div className="rk2-seg three">
               <button className={fanMode==='on'?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(true))}>On</button>
               <button className={fanMode==='off'?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(false))}>Off</button>
@@ -348,7 +349,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
   );
 }
 
-function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, fanOverride=null, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
+function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, fanOverride=null, estop=false, latched=[], onSafetyReset, reservoirFloor=20, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
   // Easter egg (Austin, 2026-11-10): press and hold the title for 3 s to get
   // the power-down popup. Nothing visible, nothing to
@@ -398,7 +399,15 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
   const doCancel = ()=>{ fire(onStop, current, ()=>setWatering(false)); };
   // Audit 3.7/3.11: one status line carries offline / lockouts / maintenance,
   // so no extra banner competes with the three plates for height.
+  // 2026-11-17: the panel could neither show an emergency stop (it read
+  // "System Fault") nor clear one, nor clear a latched pump lockout. The
+  // status line now names it and a tap opens the reset.
+  const needsReset = connection!=='offline' && (estop || latched.length>0);
+  const [resetAsk, setResetAsk] = React.useState(false);
+  const doReset = async ()=>{ setResetAsk(false); if (onSafetyReset) await onSafetyReset(); };
   const statusText = connection==='offline' ? 'Controller Offline'
+    : estop ? 'Emergency Stop · tap to reset'
+    : latched.length ? 'Locked Out · ' + latched.join(', ').replace(/_/g,' ') + ' · tap to reset'
     : rackStatus==='Locked Out' ? 'System Locked Out' + (lockouts.length ? ' · ' + lockouts.join(', ').replace(/_/g,' ') : '')
     : 'System ' + rackStatus + (maintenance && rackStatus!=='Maintenance' ? ' · maintenance' : '');
 
@@ -426,7 +435,8 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
         <div className="rk2-div"><span className="ln"></span><span className="dia"></span><span className="ln"></span></div>
         <div className="rk2-sub">
           <span className="date"><span className="k">Day</span><b>{day || '06 / 21 / 26'}</b></span>
-          <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:connection==='offline'?'var(--oxblood-l)':statusCol}}><span className="d"></span>{statusText}</span>
+          <span className={'rk2-status'+(statusText.length>24?' long':'')} style={{color:(connection==='offline'||needsReset)?'var(--oxblood-l)':statusCol, cursor:needsReset?'pointer':undefined}}
+            onClick={needsReset ? ()=>setResetAsk(true) : undefined} role={needsReset?'button':undefined}><span className="d"></span>{statusText}</span>
           <span className="time"><span className="k">Time</span><b>{clock}</b></span>
         </div>
 
@@ -445,7 +455,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
 
         <div className="rk2-resv">
           <div className="lab"><span className="ln"></span>Reservoir · {PG.TANK_L} L Tank<span className="ln"></span></div>
-          <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div><div className="floor" title="lockout floor · 20%"></div></div>
+          <div className="rk2-measure"><i style={{width:(reservoirOnline?reservoir:0)+'%'}}></i><div className="tk"></div><div className="floor" title={`lockout floor · ${reservoirFloor}%`} style={{left:reservoirFloor+'%'}}></div></div>
           {/* audit 3.9: a stale level probe reads "— %" / "sensor offline"; liters and days are estimates */}
           {reservoirOnline
             ? <div className="pct"><b>{reservoir}%</b> · est. {PG.tankLiters(reservoir)} L on hand · est. {PG.tankDays(reservoir)} days</div>
@@ -478,6 +488,23 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
                 <div style={{fontFamily:'"Newsreader",serif',fontSize:15,lineHeight:1.5}}>Relays off. The screen will go dark in a few seconds.</div>
               </React.Fragment>
             )}
+          </div>
+        </div>
+      )}
+      {resetAsk && (
+        <div className="rk2-power" onClick={()=>setResetAsk(false)}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:'#1B1812',border:'1.5px solid var(--oxblood-l)',borderRadius:10,padding:'22px 26px',maxWidth:460,textAlign:'center',color:'var(--lcd)'}}>
+            <div style={{fontFamily:'"Zilla Slab",serif',fontWeight:900,fontSize:18,marginBottom:8,color:'var(--oxblood-l)'}}>Reset safety?</div>
+            <div style={{fontFamily:'"Newsreader",serif',fontSize:15,lineHeight:1.5,marginBottom:18}}>
+              {estop
+                ? 'Clears the emergency stop. Automation resumes.'
+                : 'Clears the latched lockout (' + latched.join(', ').replace(/_/g,' ') + '). It latched because the pump ran past its limit. Look at the pump, the tray and the reservoir first.'}
+            </div>
+            <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+              <button className="rk2-plaque" style={{justifyContent:'center'}} onClick={()=>setResetAsk(false)}>Cancel</button>
+              <button className="rk2-wbtn rk2-dbtn" style={{padding:'10px 20px',color:'var(--oxblood-l)',borderColor:'var(--oxblood-l)'}} onClick={doReset}>Reset</button>
+            </div>
           </div>
         </div>
       )}

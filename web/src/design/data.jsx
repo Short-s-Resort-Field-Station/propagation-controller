@@ -91,7 +91,7 @@ PG.tankDays = (pct) => Math.max(0, Math.round(PG.tankLiters(pct) / PG.EST_DAILY_
 PG.ESCALATION_DEFAULT = { email:true, sms:false, repeatMin:15 };
 
 // derive live alerts from current state
-PG.deriveAlerts = (shelves, reservoir, clock) => {
+PG.deriveAlerts = (shelves, reservoir, clock, floor = 20) => {
   const out = [];
   shelves.forEach(s => {
     if (!s.active) return;
@@ -99,7 +99,7 @@ PG.deriveAlerts = (shelves, reservoir, clock) => {
     else if (s.status==='Dry')     out.push({ id:'D'+s.n, ts:clock, shelf:s.n, kind:'Dry',           sev:'var(--ochre)',   prio:'ACTION REQUIRED', msg:`Shelf ${s.n} below its target band.` });
     else if (s.status==='Monitoring') out.push({ id:'M'+s.n, ts:clock, shelf:s.n, kind:'Monitoring', sev:'var(--ochre)',   prio:'ATTENTION',       msg:`Shelf ${s.n} drifting toward the low band.` });
   });
-  if (reservoir<=20) out.push({ id:'RES', ts:clock, shelf:'—', kind:'Reservoir Low', sev:'var(--oxblood)', prio:'ACTION REQUIRED', msg:`Reservoir at ${reservoir}% — refill soon.` });
+  if (reservoir<=floor) out.push({ id:'RES', ts:clock, shelf:'—', kind:'Reservoir Low', sev:'var(--oxblood)', prio:'ACTION REQUIRED', msg:`Reservoir at ${reservoir}% — refill soon.` });
   return out;
 };
 

@@ -12,6 +12,7 @@ import { api, onUnauthorized } from './live/api.js';
 import { LIGHT_OVERRIDE_MIN } from './live/useUnitState.js';
 import { LiveSignInModal, SetupModal, OperatorsModal, toDesignSession } from './live/auth-ui.jsx';
 import { usePush } from './live/push-ui.jsx';
+import { buildLog } from './live/adapter.js';
 
 // Live Controls-tab bridge (design/controls.jsx): rack-wide schedules and
 // settings plus the per-shelf action buttons. Per-shelf settings live only
@@ -62,8 +63,11 @@ function makeControls(state, actions) {
         const settings = await api.settings();
         const body = {};
         if (window !== undefined) {
-          const auto = (settings.settings || {}).automation;
-          if (!auto) throw new Error('current automation settings unavailable; nothing saved');
+          // A failed read throws above. A unit that has never had automation
+          // toggled has no "automation" key yet: that is "off", not an error
+          // (it used to block saving a watering window on a fresh unit).
+          if (!settings.settings) throw new Error('current automation settings unavailable; nothing saved');
+          const auto = settings.settings.automation || { enabled: false };
           body.automation = { enabled: !!auto.enabled, watering_window: window };
         }
         if (minReservoir !== undefined) {
@@ -117,12 +121,24 @@ function App() {
   }), [canManage]);
 
   // audit 3.9: no "Reservoir Low" from a stale probe — a sensor-offline alert instead.
-  const alerts = PG.deriveAlerts(state.shelves, state.reservoirOnline ? state.reservoir : 100, state.clock)
+  const allAlerts = PG.deriveAlerts(state.shelves, state.reservoirOnline ? state.reservoir : 100, state.clock, state.reservoirFloor)
     .concat(state.ready && !state.reservoirOnline
       ? [{ id: 'RESOFF', ts: state.clock, shelf: '—', kind: 'Sensor Fault', sev: 'var(--oxblood)',
           prio: 'ACTION REQUIRED', msg: 'Reservoir level sensor not reporting — refill guard is blind.' }]
       : [])
-    .filter((a) => !acked[a.id]);
+  ;
+  const alerts = allAlerts.filter((a) => !acked[a.id]);
+  // 2026-11-17: an acknowledgement covers the alert that was showing. Once
+  // that condition clears, forget it, so the next dry spell alerts again
+  // (acks used to last until the page was reloaded).
+  const liveIds = allAlerts.map((a) => a.id).sort().join(',');
+  React.useEffect(() => {
+    setAcked((a) => {
+      const keep = {};
+      liveIds.split(',').forEach((id) => { if (id && a[id]) keep[id] = true; });
+      return Object.keys(keep).length === Object.keys(a).length ? a : keep;
+    });
+  }, [liveIds]);
 
   // 2026-11-15 review: key on what the charts depend on, not on the shelves
   // array identity (new every refresh) — otherwise each refresh restarted the
@@ -173,6 +189,9 @@ function App() {
         reservoirOnline={state.reservoirOnline}
         rackStatus={state.rackStatus}
         lockouts={state.lockouts}
+        latched={state.latched}
+        reservoirFloor={state.reservoirFloor}
+        loadHistory={async (hours) => buildLog(await api.eventsSince(new Date(Date.now() - hours * 3600e3).toISOString(), 500))}
         lastSync={state.lastSync}
         toast={state.toast}
         onDismissToast={actions.dismissToast}

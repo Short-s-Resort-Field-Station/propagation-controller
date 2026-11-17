@@ -79,6 +79,7 @@ function SchedulePanel({ title, what, form, live, canEdit, canManual, onManual, 
   const valid = validHHMM(form.v.on) && validHHMM(form.v.off) && form.v.on !== form.v.off;
   const status = live.override
     ? `Forced ${live.override.mode}${live.override.until ? ' until ' + fmtClockIso(live.override.until) : ' until cleared'}`
+      + (live.on !== (live.override.mode === 'on') ? ` · relay is ${live.on ? 'on' : 'off'}` : '')
     : form.v.enabled ? `Following schedule · relay ${live.on ? 'on' : 'off'}` : `Schedule disabled · relay ${live.on ? 'on' : 'off'}`;
   return (
     <div className="panel">

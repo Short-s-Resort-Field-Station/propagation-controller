@@ -83,8 +83,14 @@ func (s *Server) scheduledSet(w http.ResponseWriter, r *http.Request, svc *light
 	if mode == "" {
 		mode = req.Mode
 	}
+	if mode != "on" && mode != "off" && mode != "auto" {
+		writeError(w, http.StatusBadRequest, `mode must be "on", "off", or "auto"`)
+		return
+	}
 	if err := svc.SetOverride(r.Context(), mode, actor, req.ExpiresMinutes); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// The mode was accepted but the relay did not follow (safety block or
+		// board fault): 409 with the reason, so the screen shows it.
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, svc.Status(r.Context()))

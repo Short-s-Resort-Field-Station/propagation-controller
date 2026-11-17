@@ -338,17 +338,37 @@ func TestEstopAndManualLockoutSurviveRestart(t *testing.T) {
 		t.Error("emergency_stop_restored not logged")
 	}
 
-	// Reset + clear persist too: a third start sees a clean slate.
+	// One reset clears the e-stop and the latched lockout (2026-11-17), and
+	// that persists too: a third start sees a clean slate.
 	if err := sup2.Reset("manual_web"); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if err := sup2.ClearLockout(LockoutPumpMaxRuntime, "manual_web"); err != nil {
-		t.Fatalf("clear: %v", err)
+	if st := sup2.Status(ctx); st.EmergencyStop.Active || len(st.Lockouts) != 0 {
+		t.Fatalf("reset left something latched: %+v", st)
+	}
+	if err := sup2.Reset("manual_web"); err == nil {
+		t.Error("a second reset with nothing latched should say so")
 	}
 	sup3 := f.restart(t)
 	st = sup3.Status(ctx)
 	if st.EmergencyStop.Active || len(st.Lockouts) != 0 {
 		t.Fatalf("cleared state came back: %+v", st)
+	}
+}
+
+// TestResetClearsLatchedLockoutWithoutEstop: a pump-overrun lockout with no
+// e-stop is the case no screen could clear before 2026-11-17.
+func TestResetClearsLatchedLockoutWithoutEstop(t *testing.T) {
+	f := newFixture(t, testConfig())
+	ctx := context.Background()
+	f.insertLevel(t, 80, time.Now())
+	f.mgr.SetRelay(ctx, devices.PumpChannel, relay.On, "manual_web", "runtime test", 0)
+	f.waitLockout(t, LockoutPumpMaxRuntime, true, 4*time.Second)
+	if err := f.sup.Reset("manual_touch"); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if st := f.sup.Status(ctx); len(st.Lockouts) != 0 {
+		t.Fatalf("latched lockout still there: %+v", st.Lockouts)
 	}
 }
 

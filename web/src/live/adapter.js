@@ -138,7 +138,9 @@ export function buildShelves({ zonesResp, sensorsResp, lighting, relays, rules, 
       status = 'Maintenance';
     }
 
-    const last = z.last_cycle;
+    // 2026-11-17: "Last Water" is the last cycle that ran the pump. last_cycle
+    // may be a drain, a purge or a refused attempt, which read "0 min" / "—".
+    const last = z.last_watering || null;
     const species1 = cfg.species || (z.enabled ? z.name : 'Unassigned');
     const species = cfg.species2 ? `${species1} + ${cfg.species2}` : species1;
     const tag1 = (cfg.species_latin || (z.enabled ? '' : 'EMPTY BAY')).toUpperCase();

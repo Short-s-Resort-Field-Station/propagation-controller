@@ -82,11 +82,15 @@ function App() {
       }}>
         {face === 'plates' ? <RackDisplay2
           shelves={state.shelves}
-          fanOverride={state.fanOverride}
           reservoir={state.reservoir}
           reservoirOnline={state.reservoirOnline}
           rackStatus={state.rackStatus}
           lockouts={state.lockouts}
+          fanOverride={state.fanOverride}
+          estop={state.estop}
+          latched={state.latched}
+          onSafetyReset={actions.safetyReset}
+          reservoirFloor={state.reservoirFloor}
           lastSync={state.lastSync}
           toast={state.toast}
           onDismissToast={actions.dismissToast}
@@ -115,6 +119,11 @@ function App() {
           reservoirOnline={state.reservoirOnline}
           rackStatus={state.rackStatus}
           lockouts={state.lockouts}
+          fanOverride={state.fanOverride}
+          estop={state.estop}
+          latched={state.latched}
+          onSafetyReset={actions.safetyReset}
+          reservoirFloor={state.reservoirFloor}
           lastSync={state.lastSync}
           toast={state.toast}
           onDismissToast={actions.dismissToast}

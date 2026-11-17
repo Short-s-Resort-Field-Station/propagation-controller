@@ -74,6 +74,9 @@ export const api = {
   lighting: () => req('/lighting/status'),
   relays: () => req('/relays'),
   events: (limit = 8) => req(`/events?limit=${limit}`),
+  // Event history (2026-11-17): the unit's real log from a start time; the
+  // daemon caps a page at 500 rows, newest first.
+  eventsSince: (fromISO, limit = 500) => req(`/events?limit=${limit}&from=${encodeURIComponent(fromISO)}`),
   safety: () => req('/safety/status'),
   species: () => req('/species'),
   // change 3: species profiles (per-species, per-stage saved settings).

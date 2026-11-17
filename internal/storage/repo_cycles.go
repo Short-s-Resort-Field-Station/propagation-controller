@@ -132,6 +132,25 @@ func (r *CycleRepo) LastForZone(zoneID int64) (*Cycle, error) {
 	return &c, nil
 }
 
+// LastWateringForZone is the most recent cycle that ran the pump on this
+// shelf. Drains and purges record 0 s of pump time and refused attempts
+// record none, so "Last Water" on the screens no longer shows those.
+func (r *CycleRepo) LastWateringForZone(zoneID int64) (*Cycle, error) {
+	c, err := scanCycle(r.db.QueryRow(
+		`SELECT `+cycleColumns+` FROM irrigation_cycles c
+		 JOIN irrigation_zones z ON z.id = c.zone_id
+		 WHERE c.zone_id = ? AND COALESCE(c.actual_duration_seconds, 0) > 0
+		   AND COALESCE(c.trigger_source, '') NOT IN ('drain', 'purge')
+		 ORDER BY c.started_at DESC, c.id DESC LIMIT 1`, zoneID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
 // AbortInterrupted marks every cycle still "running" as aborted. Called once
 // at engine start: a cycle can only be left running by a crash or power loss,
 // and the startup safe-state has already closed its valve.

@@ -63,15 +63,18 @@ func mutationRole(method, path string) string {
 		strings.HasPrefix(p, "/lighting/on"),
 		strings.HasPrefix(p, "/lighting/off"),
 		strings.HasPrefix(p, "/lighting/override"),
+		strings.HasPrefix(p, "/lighting/auto"),
 		strings.HasPrefix(p, "/fans/on"),
 		strings.HasPrefix(p, "/fans/off"),
+		strings.HasPrefix(p, "/fans/auto"),
 		strings.HasPrefix(p, "/fans/override"),
 		strings.HasPrefix(p, "/diagnostics/"),
 		strings.HasSuffix(p, "/poll"),
 		strings.HasSuffix(p, "/run"),
 		strings.HasSuffix(p, "/drain"),
 		strings.HasSuffix(p, "/stop"),
-		p == "/safety/emergency-stop":
+		p == "/safety/emergency-stop",
+		p == "/safety/reset": // whoever can stop the rack can reset it (2026-11-17)
 		return auth.RoleOperator
 	default:
 		return auth.RoleAdmin

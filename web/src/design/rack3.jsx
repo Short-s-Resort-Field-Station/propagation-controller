@@ -230,7 +230,7 @@ function Panel({ s, onClose, onWater, onDrain, onPurge, onStop, onCancel, pendin
 }
 
 // ---- the face -------------------------------------------------------------------
-function RackDisplay3({ shelves, reservoir, reservoirOnline = true, rackStatus, lockouts = [], clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, theme, connection = 'online', initialOpen, onThemeToggle, maintenance = false, onSetMaintenance, onSetEnabled, toast = null, onDismissToast, lastSync = '—', pumpOn = false, fanOn = false }) {
+function RackDisplay3({ shelves, reservoir, reservoirOnline = true, rackStatus, lockouts = [], clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, theme, connection = 'online', initialOpen, onThemeToggle, maintenance = false, onSetMaintenance, onSetEnabled, toast = null, onDismissToast, lastSync = '—', pumpOn = false, fanOn = false, fanOverride = null }) {
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
   const current = open ? shelves.find((s) => s.n === open.n) : null;
   const wide = !current;
@@ -300,14 +300,17 @@ function RackDisplay3({ shelves, reservoir, reservoirOnline = true, rackStatus, 
               {wide && (
                 <React.Fragment>
                   <span className="k">Lights{lightOverride ? ' · manual' : ''}</span>
+                  {/* 2026-11-17: On / Off / Auto, lit by mode, as on the plates face */}
                   <span className="rk3-seg">
-                    <button className={lightOn ? 'on' : ''} disabled={offline} onClick={() => onLight && onLight(true)}>On</button>
-                    <button className={!lightOn ? 'on' : ''} disabled={offline} onClick={() => onLight && onLight(false)}>Off</button>
+                    <button className={lightOverride && lightOverride.mode === 'on' ? 'on' : ''} disabled={offline} onClick={() => onLight && onLight(true)}>On</button>
+                    <button className={lightOverride && lightOverride.mode === 'off' ? 'on' : ''} disabled={offline} onClick={() => onLight && onLight(false)}>Off</button>
+                    <button className={!lightOverride ? 'on' : ''} disabled={offline} onClick={() => onLight && onLight('auto')}>Auto</button>
                   </span>
                   <span className="k">Fans</span>
                   <span className="rk3-seg">
-                    <button className={fansOn ? 'on' : ''} disabled={offline} onClick={() => onFan && onFan(true)}>On</button>
-                    <button className={!fansOn ? 'on' : ''} disabled={offline} onClick={() => onFan && onFan(false)}>Off</button>
+                    <button className={fanOverride && fanOverride.mode === 'on' ? 'on' : ''} disabled={offline} onClick={() => onFan && onFan(true)}>On</button>
+                    <button className={fanOverride && fanOverride.mode === 'off' ? 'on' : ''} disabled={offline} onClick={() => onFan && onFan(false)}>Off</button>
+                    <button className={!fanOverride ? 'on' : ''} disabled={offline} onClick={() => onFan && onFan('auto')}>Auto</button>
                   </span>
                 </React.Fragment>
               )}
