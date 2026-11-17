@@ -82,6 +82,11 @@ type Deps struct {
 }
 
 func NewRouter(d Deps) http.Handler {
+	return withPublicPrefix(newRouter(d))
+}
+
+// newRouter builds the route table; split from NewRouter so a test can walk it.
+func newRouter(d Deps) chi.Router {
 	s := &Server{
 		mgr:          d.Manager,
 		sensors:      d.Sensors,
@@ -175,6 +180,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/lighting/status", s.handleLightingStatus)
 		r.Post("/lighting/on", s.handleLightingOn)
 		r.Post("/lighting/off", s.handleLightingOff)
+		r.Post("/lighting/auto", s.handleLightingAuto)
 		r.Post("/lighting/override", s.handleLightingOverride)
 		r.Get("/lighting/schedule", s.handleGetLightingSchedule)
 		r.Put("/lighting/schedule", s.handlePutLightingSchedule)
@@ -182,6 +188,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/fans/status", s.handleFanStatus)
 		r.Post("/fans/on", s.handleFanOn)
 		r.Post("/fans/off", s.handleFanOff)
+		r.Post("/fans/auto", s.handleFanAuto)
 		r.Post("/fans/override", s.handleFanOverride)
 		r.Get("/fans/schedule", s.handleGetFanSchedule)
 		r.Put("/fans/schedule", s.handlePutFanSchedule)
@@ -209,7 +216,7 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	s.uiRoutes(r)
-	return withPublicPrefix(r)
+	return r
 }
 
 // PublicPrefix is the path the whole app is also served under, so the same

@@ -36,6 +36,17 @@ func (s *Server) handleFanOff(w http.ResponseWriter, r *http.Request) {
 		s.scheduledSet(w, r, svc, "off")
 	}
 }
+
+// handleFanAuto clears a manual fan override. The dashboard and the rack
+// panel have always posted /fans/auto and /lighting/auto; until 2026-11-17
+// neither route existed, so "Auto" returned 404 and an override could only
+// lapse or be replaced by another one.
+func (s *Server) handleFanAuto(w http.ResponseWriter, r *http.Request) {
+	if svc := s.fanSvc(w); svc != nil {
+		s.scheduledSet(w, r, svc, "auto")
+	}
+}
+
 func (s *Server) handleFanOverride(w http.ResponseWriter, r *http.Request) {
 	if svc := s.fanSvc(w); svc != nil {
 		s.scheduledSet(w, r, svc, "")
@@ -85,6 +96,10 @@ func (s *Server) handleLightingOn(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLightingOff(w http.ResponseWriter, r *http.Request) {
 	s.lightingSet(w, r, "off")
+}
+
+func (s *Server) handleLightingAuto(w http.ResponseWriter, r *http.Request) {
+	s.lightingSet(w, r, "auto")
 }
 
 func (s *Server) handleLightingOverride(w http.ResponseWriter, r *http.Request) {

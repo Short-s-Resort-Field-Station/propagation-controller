@@ -150,7 +150,7 @@ function Ledger({ shelves, onOpen }){
   );
 }
 
-function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, watering, busy=false, pending=false, theme, onLight, onFan, maintenance, onSetMaintenance, onSetEnabled, connection='online', lastSync='—' }){
+function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, watering, busy=false, pending=false, theme, onLight, onFan, fanOverride=null, maintenance, onSetMaintenance, onSetEnabled, connection='online', lastSync='—' }){
   const col = watering ? 'var(--river-l)' : (SC2[s.status] || 'var(--sfaint)');
   const label = watering ? 'Watering' : s.status;
   const sev = watering ? PG.STATUS['Watering'].sev : (PG.STATUS[s.status] || PG.STATUS.Inactive).sev;
@@ -185,6 +185,12 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
   // ganged circuit — both render from live state, not local state.
   const lightOn = s.light;
   const fanOn = !!s.fan;
+  // 2026-11-17: three-way switches. The lit button is the MODE (a manual
+  // override, or Auto = on the schedule); the line beside it says what the
+  // relay is doing now. Before this the panel had no way back to Auto.
+  const lightMode = s.lightOverride ? s.lightOverride.mode : 'auto';
+  const fanMode = fanOverride ? fanOverride.mode : 'auto';
+  const forced = (o)=>`Forced ${o.mode}${o.until ? ' until '+fmtUntil(o.until) : ''}`;
   return (
     <div className={"rk2-detail"+(theme==='light'?' light':'')}>
       <div className="rk2-grain"></div>
@@ -241,17 +247,19 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
         <div className="rk2-controls2">
           <div className="rk2-light">
             {/* audit 3.10: a manual override is visible wherever lights are toggled */}
-            <div className="ll"><span className="k">Lighting · Rack{s.lightOverride ? ' · manual' : ''}</span><span className="ph">{s.lightOverride ? `Forced ${s.lightOverride.mode}${s.lightOverride.until ? ' until '+fmtUntil(s.lightOverride.until) : ''}` : `${s.on} – ${s.off}`}</span></div>
-            <div className="rk2-seg">
-              <button className={lightOn?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(true))}>On</button>
-              <button className={!lightOn?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(false))}>Off</button>
+            <div className="ll"><span className="k">Lighting · Rack</span><span className="ph">{s.lightOverride ? forced(s.lightOverride) : `${s.on} – ${s.off} · ${lightOn?'on':'off'} now`}</span></div>
+            <div className="rk2-seg three">
+              <button className={lightMode==='on'?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(true))}>On</button>
+              <button className={lightMode==='off'?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight(false))}>Off</button>
+              <button className={lightMode==='auto'?'on':''} disabled={offline} onClick={guard(()=>onLight && onLight('auto'))}>Auto</button>
             </div>
           </div>
           <div className="rk2-light">
-            <div className="ll"><span className="k">Fans · Rack</span><span className="ph">Circulation</span></div>
-            <div className="rk2-seg">
-              <button className={fanOn?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(true))}>On</button>
-              <button className={!fanOn?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(false))}>Off</button>
+            <div className="ll"><span className="k">Fans · Rack</span><span className="ph">{fanOverride ? forced(fanOverride) : `Circulation · ${fanOn?'on':'off'} now`}</span></div>
+            <div className="rk2-seg three">
+              <button className={fanMode==='on'?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(true))}>On</button>
+              <button className={fanMode==='off'?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan(false))}>Off</button>
+              <button className={fanMode==='auto'?'on':''} disabled={offline} onClick={guard(()=>onFan && onFan('auto'))}>Auto</button>
             </div>
           </div>
         </div>
@@ -340,7 +348,7 @@ function Detail2({ s, onBack, onWater, onDrain, onPurge, onCancel, onStop, water
   );
 }
 
-function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
+function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], layout, clock, day, onWater, onDrain, onPurge, onStop, onShutdown, onLight, onFan, fanOverride=null, theme, locked, connection='online', onUnlock, initialOpen, onThemeToggle, maintenance=false, onSetMaintenance, onSetEnabled, toast=null, onDismissToast, lastSync='—' }){
   const [open, setOpen] = React.useState(initialOpen ? { n: initialOpen } : null);
   // Easter egg (Austin, 2026-11-10): press and hold the title for 3 s to get
   // the power-down popup. Nothing visible, nothing to
@@ -445,7 +453,7 @@ function RackDisplay2({ shelves, reservoir, reservoirOnline=true, rackStatus, lo
         </div>
       </div>
 
-      {current && <Detail2 s={current} watering={watering} busy={busy} pending={pending} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onDrain={doDrain} onPurge={doPurge} onCancel={doCancel} onStop={doStop} onLight={onLight} onFan={onFan}
+      {current && <Detail2 s={current} watering={watering} busy={busy} pending={pending} theme={theme} onBack={()=>setOpen(null)} onWater={doWater} onDrain={doDrain} onPurge={doPurge} onCancel={doCancel} onStop={doStop} onLight={onLight} onFan={onFan} fanOverride={fanOverride}
         maintenance={maintenance} onSetMaintenance={onSetMaintenance} onSetEnabled={onSetEnabled} connection={connection} lastSync={lastSync}/>}
       {/* the toast also shows over the detail screen */}
       {current && toast && (

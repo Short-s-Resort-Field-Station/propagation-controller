@@ -98,6 +98,12 @@
 .rk2-light .ll .k { font-size: 14px; }
 .rk2-light .ll .ph { font-size: 18px; }
 .rk2-seg button { font-size: 16px; padding: 12px 22px; }
+/* 2026-11-17: On / Off / Auto. Narrower buttons so three fit beside the label on the 800 px panel. */
+.rk2-seg.three button { padding: 12px 13px; letter-spacing: 0.12em; }
+/* the switch keeps its width; a long status line wraps instead of pushing Auto out of view */
+.rk2-seg.three { flex: none; }
+.rk2-light .ll { min-width: 0; }
+.rk2-seg.three button:not(:last-child) { border-right: 1.5px solid var(--sline); }
 .rk2-wbtn { font-size: 19px; padding: 16px 0; }
 .rk2-pump .lbl { font-size: 15px; }
 

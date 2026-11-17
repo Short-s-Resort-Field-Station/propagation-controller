@@ -82,6 +82,7 @@ function App() {
       }}>
         {face === 'plates' ? <RackDisplay2
           shelves={state.shelves}
+          fanOverride={state.fanOverride}
           reservoir={state.reservoir}
           reservoirOnline={state.reservoirOnline}
           rackStatus={state.rackStatus}
