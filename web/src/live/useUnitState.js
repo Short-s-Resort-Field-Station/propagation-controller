@@ -141,11 +141,14 @@ export function useUnitState(surface /* 'manual_web' | 'manual_touch' */) {
         lastSync: now,
         estop: !!(safety.emergency_stop && safety.emergency_stop.active),
         maintenance,
+        // actor + since ride along so the dashboard can say who forced it and when.
         lightOverride: lighting.override
-          ? { mode: lighting.override.mode, until: lighting.override.until || null }
+          ? { mode: lighting.override.mode, until: lighting.override.until || null,
+              actor: lighting.override.actor || '', since: lighting.override.since || null }
           : null,
         fanOverride: fans && fans.override
-          ? { mode: fans.override.mode, until: fans.override.until || null }
+          ? { mode: fans.override.mode, until: fans.override.until || null,
+              actor: fans.override.actor || '', since: fans.override.since || null }
           : null,
         fanOn: fans ? fans.relay_state === 'on'
           : (relays.relays || []).some((r) => r.channel === FANS_RELAY && r.state === 'on'),

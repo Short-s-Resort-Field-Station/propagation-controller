@@ -172,6 +172,42 @@ func main() {
 		scheduleRepo, settingsRepo, eventLog, log, 10*time.Second)
 	notifySvc.Maintenance = autoSvc.MaintenanceActive
 	notifySvc.Start(ctx)
+	// Monday-morning summary of the week before (2026-11-17).
+	batchRepo := storage.NewBatchRepo(db)
+	notifySvc.StartWeekly(ctx,
+		func(from, to time.Time) ([]notify.WeeklyShelf, error) {
+			zones, err := zoneRepo.List()
+			if err != nil {
+				return nil, err
+			}
+			onShelf := map[string]string{}
+			if batches, err := batchRepo.List(); err == nil {
+				for _, b := range batches {
+					if b.ZoneKey != "" && onShelf[b.ZoneKey] == "" {
+						onShelf[b.ZoneKey] = b.BatchCode
+					}
+				}
+			}
+			var out []notify.WeeklyShelf
+			for _, z := range zones {
+				c, err := batchRepo.Conditions(z.ZoneKey, from, to)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, notify.WeeklyShelf{Name: z.Name, Batch: onShelf[z.ZoneKey],
+					Waterings: c.Waterings, Low: c.MoistureLow, High: c.MoistureHigh})
+			}
+			return out, nil
+		},
+		func() string {
+			v, _, _ := settingsRepo.Get("weekly_summary_sent")
+			return strings.Trim(v, `"`)
+		},
+		func(week string) {
+			if err := settingsRepo.Set("weekly_summary_sent", `"`+week+`"`); err != nil {
+				log.Warn().Err(err).Msg("weekly summary: could not record the sent week")
+			}
+		})
 	autoSvc.Start(ctx)
 
 	aggregateRepo := storage.NewAggregateRepo(db)

@@ -42,6 +42,7 @@ type Server struct {
 	zones        *storage.ZoneRepo
 	cycles       *storage.CycleRepo
 	profiles     *storage.SpeciesProfileRepo
+	batches      *storage.BatchRepo
 	eventLog     *logging.EventLogger
 	push         *notify.Service
 	pushRepo     *storage.PushRepo
@@ -110,6 +111,7 @@ func newRouter(d Deps) chi.Router {
 		// change 3: species profiles repo derives from the shared DB handle —
 		// no new Deps wiring needed at the cmd layer.
 		profiles:   storage.NewSpeciesProfileRepo(d.DB),
+		batches:    storage.NewBatchRepo(d.DB),
 		eventLog:   d.EventLog,
 		push:       d.Push,
 		pushRepo:   d.PushRepo,
@@ -148,6 +150,7 @@ func newRouter(d Deps) chi.Router {
 		r.Post("/relays/{channel}/set", s.handleSetRelay)
 		r.Post("/relays/all-off", s.handleAllOff)
 		r.Post("/system/shutdown", s.handleSystemShutdown)
+		r.Get("/system/box", s.handleBox)
 
 		r.Get("/devices", s.handleListDevices)
 
@@ -195,6 +198,15 @@ func newRouter(d Deps) chi.Router {
 
 		r.Get("/species", s.handleListSpecies)
 		// change 3: species profiles CRUD (per-species, per-stage saved settings)
+		// 2026-11-17: propagation batches + dated log, and the two-sheet export.
+		r.Get("/batches", s.handleListBatches)
+		r.Post("/batches", s.handleCreateBatch)
+		r.Get("/batches/{id}", s.handleGetBatch)
+		r.Patch("/batches/{id}", s.handlePatchBatch)
+		r.Delete("/batches/{id}", s.handleDeleteBatch)
+		r.Post("/batches/{id}/log", s.handleBatchLog)
+		r.Get("/export/batches.csv", s.handleExportBatches)
+		r.Get("/export/batch-log.csv", s.handleExportBatchLog)
 		r.Get("/species-profiles", s.handleListSpeciesProfiles)
 		r.Post("/species-profiles", s.handleCreateSpeciesProfile)
 		r.Get("/species-profiles/{id}", s.handleGetSpeciesProfile)

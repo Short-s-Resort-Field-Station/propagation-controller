@@ -8,7 +8,7 @@ import { PG } from './design/data.jsx';
 import { Dashboard } from './design/dashboard.jsx';
 import { useUnitState } from './live/useUnitState.js';
 import { getEnvSeries } from './live/series.js';
-import { api, onUnauthorized } from './live/api.js';
+import { api, onUnauthorized, exportUrl } from './live/api.js';
 import { LIGHT_OVERRIDE_MIN } from './live/useUnitState.js';
 import { LiveSignInModal, SetupModal, OperatorsModal, toDesignSession } from './live/auth-ui.jsx';
 import { usePush } from './live/push-ui.jsx';
@@ -17,6 +17,9 @@ import { buildLog } from './live/adapter.js';
 // Live Controls-tab bridge (design/controls.jsx): rack-wide schedules and
 // settings plus the per-shelf action buttons. Per-shelf settings live only
 // in Shelf Management's edit modal (single source of truth).
+// Stable identity so the Control box panel's poll is not restarted every render.
+const loadBox = () => api.box();
+
 function makeControls(state, actions) {
   const list = state.shelves.map((s) => ({
     n: s.n, zoneKey: s.zoneKey, species: s.species, latin: s.latin, active: s.active, assigned: s.assigned,
@@ -29,6 +32,7 @@ function makeControls(state, actions) {
 
   return {
     list,
+    loadBox,
     live: {
       lightOn: state.shelves.length ? state.shelves[0].light : false,
       lightOverride: state.lightOverride,
@@ -90,6 +94,18 @@ function makeControls(state, actions) {
   };
 }
 
+// One alert row for a relay held off its schedule: what, which way, by which
+// screen, since when, and when (if ever) it lets go on its own.
+const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+function overrideNotice(id, what, o, clock) {
+  if (!o) return [];
+  const where = o.actor === 'manual_touch' ? ' from the rack panel' : o.actor === 'manual_web' ? ' from the dashboard' : '';
+  const since = o.since && hhmm(o.since) ? ` since ${hhmm(o.since)}` : '';
+  const ends = o.until && hhmm(o.until) ? `Back to schedule at ${hhmm(o.until)}.` : 'Stays that way until switched to Auto.';
+  return [{ id, ts: clock, shelf: '—', kind: 'Manual Override', sev: 'var(--ochre)', prio: 'ATTENTION',
+    msg: `${what} forced ${o.mode}${where}${since}. ${ends}` }];
+}
+
 function App() {
   const [state, actions] = useUnitState('manual_web');
   const [session, setSession] = React.useState(undefined); // undefined = loading
@@ -126,7 +142,18 @@ function App() {
       ? [{ id: 'RESOFF', ts: state.clock, shelf: '—', kind: 'Sensor Fault', sev: 'var(--oxblood)',
           prio: 'ACTION REQUIRED', msg: 'Reservoir level sensor not reporting — refill guard is blind.' }]
       : [])
+    // 2026-11-17: a forced relay is said out loud. Lights sat forced On from the
+    // panel all evening and only the panel showed it.
+    .concat(overrideNotice('OVL', 'Lights', state.lightOverride, state.clock))
+    .concat(overrideNotice('OVF', 'Fans', state.fanOverride, state.clock))
   ;
+  // Batches tab: the live API plus the shelves a batch can sit on.
+  const shelfKeys = state.shelves.map((s) => s.zoneKey + ':' + s.n).join(',');
+  const batchStore = React.useMemo(() => ({
+    list: api.batches, get: api.batch, create: api.createBatch, patch: api.patchBatch, log: api.logBatch,
+    exportUrls: { batches: exportUrl('batches'), log: exportUrl('log') },
+    shelves: state.shelves.map((s) => ({ key: s.zoneKey, name: 'Shelf ' + Number(s.n) })),
+  }), [shelfKeys]);
   const alerts = allAlerts.filter((a) => !acked[a.id]);
   // 2026-11-17: an acknowledgement covers the alert that was showing. Once
   // that condition clears, forget it, so the next dry spell alerts again
@@ -217,6 +244,7 @@ function App() {
         onAssign={actions.assign}
         getSeries={getSeries}
         controls={controls}
+        batchStore={batchStore}
         maintenance={state.maintenance}
         onSetMaintenance={actions.setMaintenance}
         onSetEnabled={actions.setShelfEnabled}

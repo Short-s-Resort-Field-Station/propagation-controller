@@ -221,6 +221,67 @@ function useDemoControls(){
 
 // ---------- the tab ----------
 
+// ---- Control box (2026-11-17) ----------------------------------------------
+// What the box itself reports: network, signal, build, uptime. Read-only, and
+// only for signed-in people (the server refuses anyone else). Rows the box
+// cannot supply are left out, never guessed.
+const fmtAgo = (sec) => {
+  if (sec == null) return '';
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  return d > 0 ? `${d} d ${h} h` : h > 0 ? `${h} h ${m} min` : m > 0 ? `${m} min` : 'Under a minute';
+};
+const fmtWhen = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+};
+const signalWord = (dbm, pct) => {
+  if (dbm != null) return dbm >= -60 ? 'Strong' : dbm >= -70 ? 'Good' : dbm >= -78 ? 'Weak' : 'Very weak';
+  if (pct != null) return pct >= 70 ? 'Strong' : pct >= 50 ? 'Good' : pct >= 30 ? 'Weak' : 'Very weak';
+  return '';
+};
+function BoxPanel({ load, signedIn }){
+  const [box, setBox] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  React.useEffect(() => {
+    if (!load || !signedIn) return undefined;
+    let alive = true;
+    const tick = () => load().then((b) => { if (alive) { setBox(b); setErr(''); } })
+      .catch((e) => { if (alive) setErr((e && e.message) || 'The box did not answer.'); });
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [load, signedIn]);
+  if (!load) return null;
+  const Row = ({ label, sub, value }) => (
+    <div className="ctrl-row"><div className="cl">{label}{sub ? <small>{sub}</small> : null}</div><div className="cv box-cv">{value}</div></div>
+  );
+  const n = box && box.network;
+  const sig = n && n.kind === 'wifi' ? signalWord(n.signal_dbm, n.signal_percent) : '';
+  return (
+    <div className="panel box-panel">
+      <div className="ph"><div className="pt">Control box</div><div className="pm">{box && box.hostname ? box.hostname : 'Read-only'}</div></div>
+      <div className="pb">
+        {!signedIn && <div className="ctrl-note">Sign in to see the box’s network and build.</div>}
+        {signedIn && !box && !err && <div className="ctrl-note">Asking the box…</div>}
+        {signedIn && err && !box && <div className="ctrl-note">{err}</div>}
+        {box && <>
+          {n
+            ? <Row label="Network" sub={n.kind === 'wifi' ? 'Wi-Fi' : 'Cable'} value={n.name || n.interface}/>
+            : <Row label="Network" sub="Not reported by this box" value="—"/>}
+          {n && n.kind === 'wifi' && sig && <Row label="Signal" sub={[n.signal_dbm != null ? n.signal_dbm + ' dBm' : '', n.signal_percent != null ? n.signal_percent + '%' : ''].filter(Boolean).join(' · ')} value={sig}/>}
+          {n && n.address && <Row label="Address" sub="On the home network" value={n.address}/>}
+          <Row label="Build" sub={box.installed_at ? 'Installed ' + fmtWhen(box.installed_at) : (box.simulation ? 'Simulator' : '')} value={(box.build || '').split('-')[0] || '—'}/>
+          <Row label="Controller running" sub="Since its last restart or update" value={fmtAgo(box.daemon_uptime_seconds)}/>
+          {box.host_uptime_seconds != null && <Row label="Box powered on" sub="Since its last boot" value={fmtAgo(box.host_uptime_seconds)}/>}
+          {box.cpu_temp_c != null && <Row label="Processor" sub="Temperature" value={Math.round(box.cpu_temp_c) + ' °C'}/>}
+          {box.disk_free_bytes != null && <Row label="Storage free" sub={box.disk_size_bytes ? 'Of ' + (box.disk_size_bytes / 1e9).toFixed(0) + ' GB' : ''} value={(box.disk_free_bytes / 1e9).toFixed(1) + ' GB'}/>}
+        </>}
+      </div>
+    </div>
+  );
+}
+
 function ControlsTab({ role, controls }){
   const demo = useDemoControls();
   const c = controls || demo;
@@ -272,6 +333,7 @@ function ControlsTab({ role, controls }){
           canEdit={canEdit} canManual={canManual} onManual={c.manualFan} onSave={saveSched('fans')}/>
       </div>
       <ShelfActions list={shelfList} canManual={canManual} onWater={c.water} onDrain={c.drain} onPurge={c.purge} onStop={c.stop}/>
+      <BoxPanel load={c.loadBox} signedIn={!!role}/>
     </div>
   );
 }

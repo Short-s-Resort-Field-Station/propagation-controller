@@ -3,12 +3,13 @@ import { PG, ForestMark, EventBars } from './data.jsx';
 import { AssignModal, SignInModal, Confirm, AlertsModal, HistoryModal, AlertBar, OfflineBanner, EstopBanner, MaintenanceBanner } from './flows.jsx';
 import { ControlsTab } from './controls.jsx';
 import { TimeChart } from './timechart.jsx';
+import { BatchesTab } from './batches.jsx';
 import { DialG } from './rack3.jsx';
 
 // pgui-dashboard.jsx — the web dashboard (paper). Tabs:
 // Dashboard · Shelf Management · Environmental · Controls
 
-const DB_TABS = ['Dashboard','Shelf Management','Environmental','Controls'];
+const DB_TABS = ['Dashboard','Shelf Management','Batches','Environmental','Controls'];
 
 // ---------- DASHBOARD (overview + log) ----------
 function OverviewTab({ shelves, reservoir, reservoirOnline=true, reservoirFloor=20, rackStatus, lockouts=[], log, alerts, onOpenAlerts, onOpenHistory }){
@@ -29,7 +30,12 @@ function OverviewTab({ shelves, reservoir, reservoirOnline=true, reservoirFloor=
       : { k:'Reservoir', v:'—', unit:'%', n:'level sensor offline' },
     { k:'Active Shelves', v:active.length, unit:' / '+shelves.length, n: vacant? vacant+(vacant===1?' bay':' bays')+' unassigned':'All bays assigned' },
     { k:'Watering Now', v:watering, n: watering? 'Cycle in progress':'Pump at rest' },
-    { k:'Active Alerts', v:issues.length, n: issues.length? issues[0].status+' · Shelf '+issues[0].n : 'None outstanding' },
+    // 2026-11-17: one count. This tile read shelf problems only, so it said
+    // "0 · None outstanding" beside an alert bar showing a low reservoir or a
+    // forced relay. It now counts what the Alerts button counts.
+    alerts
+      ? { k:'Active Alerts', v:alerts.length, n: alerts.length ? alerts[0].kind + (alerts[0].shelf && alerts[0].shelf !== '—' ? ' · Shelf '+alerts[0].shelf : '') : 'None outstanding' }
+      : { k:'Active Alerts', v:issues.length, n: issues.length? issues[0].status+' · Shelf '+issues[0].n : 'None outstanding' },
   ];
   return (
     <div>
@@ -347,7 +353,7 @@ function initialTab(){
 
 // `auth` (live build): { SignInModal, canManage, openOperators } — swaps the
 // demo PIN sign-in for the real one and adds operator management for admins.
-function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, latched=[], reservoirFloor=20, loadHistory, onEmergencyStop, onSafetyReset, signInRequest=0, push=null }){
+function Dashboard({ batchStore, shelves, reservoir, reservoirOnline=true, rackStatus, lockouts=[], log, session, onSignIn, onSignOut, alerts=[], onAck, onAckAll, connection='online', lastSync='—', assignments, onAssign, getSeries, controls, auth, maintenance=false, onSetMaintenance, onSetEnabled, onUnassign, profiles, toast=null, onDismissToast, estop=false, latched=[], reservoirFloor=20, loadHistory, onEmergencyStop, onSafetyReset, signInRequest=0, push=null }){
   const [tab, setTab] = React.useState(initialTab);
   const [assignFor, setAssignFor] = React.useState(null);
   const [showSignIn, setShowSignIn] = React.useState(false);
@@ -452,6 +458,7 @@ function Dashboard({ shelves, reservoir, reservoirOnline=true, rackStatus, locko
           onUnassign={onUnassign ? (n)=>setConfirmShelf({n,kind:'clear'}) : undefined}
           role={role}/>}
         {tab==='Environmental' && <EnvironmentalTab getSeries={getSeries} shelves={effShelves}/>}
+        {tab==='Batches' && <BatchesTab store={batchStore} role={role}/>}
         {tab==='Controls' && <ControlsTab role={role} controls={controls}/>}
       </div>
 

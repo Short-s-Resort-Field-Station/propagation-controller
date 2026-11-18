@@ -1,0 +1,47 @@
+# Hourly check that the unit answers from outside the house (Austin,
+# 2026-11-17: the box was offline eleven hours after a power cut and nothing
+# said so). The run FAILS when the unit cannot be reached, and GitHub emails
+# the failure to whoever last changed this schedule. Nothing is written to the
+# repository: no issues, no comments.
+#
+# Three tries a minute apart, so a blip or a self-update restart is not an
+# outage. "degraded" (a relay board or sensor bus down) fails too.
+name: unit-watch
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: unit-watch
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the unit for its health
+        run: |
+          url=https://shortsfieldstation.org/propagate/api/v1/health
+          for try in 1 2 3; do
+            code=$(curl -s -m 20 -o health.json -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then
+              status=$(jq -r '.status // "unknown"' health.json 2>/dev/null || echo unreadable)
+              build=$(jq -r '.build // "?"' health.json 2>/dev/null || echo '?')
+              if [ "$status" = "ok" ]; then
+                echo "Unit is online and healthy (build $build)."
+                exit 0
+              fi
+              echo "::warning::Unit answered but reports '$status' (try $try)."
+              cat health.json; echo
+            else
+              echo "::warning::Unit did not answer (HTTP $code, try $try)."
+            fi
+            [ "$try" != 3 ] && sleep 60
+          done
+          if [ "$code" = "200" ]; then
+            echo "::error::Propagation Unit 01 is online but not healthy: $status."
+          else
+            echo "::error::Propagation Unit 01 is OFFLINE (HTTP $code). Check power, then Wi-Fi."
+          fi
+          exit 1

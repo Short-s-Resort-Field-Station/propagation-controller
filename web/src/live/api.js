@@ -69,6 +69,16 @@ export const api = {
   deleteUser: (username) => req(`/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
 
   health: () => req('/health'),
+  // Propagation batches and their dated log (2026-11-17).
+  batches: () => req('/batches'),
+  batch: (id) => req(`/batches/${id}`),
+  createBatch: (body) => post('/batches', body),
+  patchBatch: (id, body) => req(`/batches/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  }),
+  logBatch: (id, body) => post(`/batches/${id}/log`, body),
+  // The control box itself: network, signal, build, uptime. Signed-in only.
+  box: () => req('/system/box'),
   zones: () => req('/irrigation/zones'),
   sensors: () => req('/sensors'),
   lighting: () => req('/lighting/status'),
@@ -145,3 +155,8 @@ export const api = {
   shutdown: (actor) => post('/system/shutdown', { actor, reason: 'shutdown from the screen' }),
   safetyReset: (actor) => post('/safety/reset', { actor }),
 };
+
+// Downloads the browser fetches by itself (a link, not a call): the two sheets
+// of the batch format. Checked against the route table by the contract test.
+export const EXPORT_PATHS = { batches: '/export/batches.csv', log: '/export/batch-log.csv' };
+export const exportUrl = (which) => BASE + EXPORT_PATHS[which];

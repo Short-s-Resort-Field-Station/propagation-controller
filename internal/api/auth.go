@@ -59,6 +59,12 @@ func mutationRole(method, path string) string {
 		return "" // login/logout/setup manage themselves
 	case strings.HasPrefix(p, "/push/"):
 		return "" // any signed-in operator owns their own phone (handlers check)
+	case strings.HasPrefix(p, "/batches"):
+		// Growers keep the batch records; removing one for good is a Steward's call.
+		if method == "DELETE" {
+			return auth.RoleAdmin
+		}
+		return auth.RoleOperator
 	case strings.HasPrefix(p, "/relays/"),
 		strings.HasPrefix(p, "/lighting/on"),
 		strings.HasPrefix(p, "/lighting/off"),

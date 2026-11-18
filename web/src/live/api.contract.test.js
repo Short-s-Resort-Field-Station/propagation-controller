@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { api, BASE } from './api.js';
+import { api, BASE, EXPORT_PATHS, exportUrl } from './api.js';
 
 const ROUTES = fs.readFileSync(path.resolve(__dirname, '../../../internal/api/testdata/routes.txt'), 'utf8')
   .split('\n').filter(Boolean).map((l) => {
@@ -54,6 +54,13 @@ describe('api.js ↔ daemon route table', () => {
       }
     }
     expect(missing, 'api.js calls with no daemon route:\n' + missing.join('\n')).toEqual([]);
+  });
+
+  it('every download link points at a path the daemon serves', () => {
+    for (const which of Object.keys(EXPORT_PATHS)) {
+      expect(exportUrl(which).startsWith(BASE)).toBe(true);
+      expect(served('GET', '/api/v1' + EXPORT_PATHS[which]), `no route for the ${which} download`).toBe(true);
+    }
   });
 
   it('the route table is not empty and knows the scheduled modes', () => {

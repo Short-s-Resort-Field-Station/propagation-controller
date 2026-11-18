@@ -23,7 +23,7 @@ const GETS = {
   '/events?limit=10': { events: [] },
   '/safety/status': { emergency_stop: { active: false }, lockouts: [] },
   '/settings': { settings: { automation: { enabled: true, watering_window: { start: '07:45', end: '11:00' } } } },
-  '/fans/status': { state: 'manual_on', relay_state: 'on', override: { mode: 'on', until: null } },
+  '/fans/status': { state: 'manual_on', relay_state: 'on', override: { mode: 'on', until: null, actor: 'manual_touch', since: '2026-11-18T01:13:24Z' } },
   '/species': { species: [] },
   '/irrigation/zones/zone_3/moisture-control': { trigger_below: 45, recovered_above: 60, run_duration_seconds: 300 },
 };
@@ -159,7 +159,7 @@ describe('useUnitState', () => {
     await waitFor(() => expect(result.current[0].ready).toBe(true));
     const [state, actions] = result.current;
     expect(state.fanOn).toBe(true);
-    expect(state.fanOverride).toEqual({ mode: 'on', until: null });
+    expect(state.fanOverride).toEqual({ mode: 'on', until: null, actor: 'manual_touch', since: '2026-11-18T01:13:24Z' });
     expect(state.automation).toEqual({ enabled: true, window: { start: '07:45', end: '11:00' } });
     await act(async () => { await actions.fans(false); });
     const off = calls.find((c) => c.path === '/fans/off');

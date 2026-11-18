@@ -10,6 +10,7 @@ export const PUSH_CATEGORIES = [
   { k: 'dry',       label: 'Shelf below its band',  sub: 'A shelf drops under its watering band, whether or not automation may act' },
   { k: 'reservoir', label: 'Reservoir',             sub: 'Pump lockouts: tank empty or level sensor offline, and the all-clear' },
   { k: 'faults',    label: 'Sensors & faults',      sub: 'A probe or device going offline (off by default)' },
+  { k: 'summary',   label: 'Weekly summary',        sub: 'Monday morning: last week’s waterings and moisture range per shelf' },
 ];
 
 function b64ToU8(b64) {

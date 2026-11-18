@@ -304,6 +304,7 @@ func TestWaterNowRunsTheShelfSoakTime(t *testing.T) {
 	if resp["duration_seconds"] != float64(420) {
 		t.Errorf("water now ran %v s, want the rule's 420", resp["duration_seconds"])
 	}
-	s.irrigation.StopAll("test")
-	waitIdle(t, s.irrigation)
+	// The harness cleanup stops the engine. Waiting here for "idle" raced the
+	// soak start: once water is flowing a stop drains the tray first, so on a
+	// busy machine the wait timed out (seen 2026-11-17 at load 9.8).
 }

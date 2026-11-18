@@ -73,11 +73,11 @@ const (
 	CatFaults    = "faults"
 )
 
-var Categories = []string{CatWatering, CatDry, CatReservoir, CatFaults}
+var Categories = []string{CatWatering, CatDry, CatReservoir, CatFaults, CatSummary}
 
 // DefaultPrefs: the two Austin asked for plus the reservoir; faults opt-in.
 func DefaultPrefs() map[string]bool {
-	return map[string]bool{CatWatering: true, CatDry: true, CatReservoir: true, CatFaults: false}
+	return map[string]bool{CatWatering: true, CatDry: true, CatReservoir: true, CatFaults: false, CatSummary: true}
 }
 
 func PrefsFromJSON(raw string) map[string]bool {
